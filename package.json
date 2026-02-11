@@ -16,9 +16,12 @@
     ]
   },
   "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.50.0",
     "pi-subagents": ">=0.8.0"
   },
   "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.52.0",
+    "@sinclair/typebox": "^0.34.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

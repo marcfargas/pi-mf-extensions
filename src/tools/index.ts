@@ -1,41 +1,76 @@
 /**
  * Plan tools: plan_propose, plan_list, plan_get, plan_approve, plan_reject.
+ *
+ * Registered via pi.registerTool() with TypeBox schemas.
  */
 
-import type { PiExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
+import { Type, type Static } from "@sinclair/typebox";
 import type { PlanStore } from "../persistence/plan-store.js";
+import type { PlanStatus } from "../persistence/types.js";
 
-export function registerPlanTools(ctx: PiExtensionContext, store: PlanStore): void {
+// ── Schemas ─────────────────────────────────────────────────
+
+const StepSchema = Type.Object({
+	description: Type.String({ description: "What this step does" }),
+	tool: Type.String({ description: "Tool needed (e.g., odoo-toolbox, go-easy)" }),
+	operation: Type.String({ description: "Specific operation (e.g., write, draft, send)" }),
+	target: Type.Optional(Type.String({ description: "Target entity/record if known" })),
+});
+
+const ProposeParams = Type.Object({
+	title: Type.String({ description: "Short description of what this plan does" }),
+	steps: Type.Array(StepSchema, { description: "Ordered list of actions to execute" }),
+	context: Type.Optional(Type.String({ description: "Structured context gathered during planning (tool outputs, notes)" })),
+});
+
+const ListParams = Type.Object({
+	status: Type.Optional(Type.String({ description: "Filter by status (proposed, approved, executing, completed, failed, rejected, cancelled)" })),
+});
+
+const IdParams = Type.Object({
+	id: Type.String({ description: "Plan ID (e.g., PLAN-a1b2c3d4)" }),
+});
+
+const RejectParams = Type.Object({
+	id: Type.String({ description: "Plan ID to reject" }),
+	feedback: Type.Optional(Type.String({ description: "Rejection reason or feedback for re-planning" })),
+});
+
+// ── Helpers ─────────────────────────────────────────────────
+
+function textResult<T = unknown>(text: string, isError = false): AgentToolResult<T> {
+	return {
+		content: [{ type: "text", text }],
+		details: {} as T,
+		...(isError ? { isError: true } : {}),
+	} as AgentToolResult<T>;
+}
+
+// ── Registration ────────────────────────────────────────────
+
+export function registerPlanTools(
+	pi: ExtensionAPI,
+	getStore: (cwd: string) => PlanStore,
+): void {
 	// plan_propose
-	ctx.registerTool?.({
+	pi.registerTool({
 		name: "plan_propose",
+		label: "Plan Propose",
 		description: `Propose a plan for consequential external actions that need user approval.
 Use for: Odoo writes, email sends, calendar changes, deployments, cross-system workflows.
 Do NOT use for: file edits, git ops, build/test commands, reading from systems.
 The plan will be presented to the user for approval before execution.`,
-		parameters: {
-			type: "object",
-			properties: {
-				title: { type: "string", description: "Short description of what this plan does" },
-				steps: {
-					type: "array",
-					items: {
-						type: "object",
-						properties: {
-							description: { type: "string" },
-							tool: { type: "string", description: "Tool needed (e.g., odoo-toolbox, go-easy)" },
-							operation: { type: "string", description: "Specific operation (e.g., write, draft, send)" },
-							target: { type: "string", description: "Target entity/record if known" },
-						},
-						required: ["description", "tool", "operation"],
-					},
-				},
-				context: { type: "string", description: "Structured context gathered during planning (tool outputs, notes)" },
-			},
-			required: ["title", "steps"],
-		},
-		execute: async (params) => {
-			const toolsRequired = [...new Set(params.steps.map((s: any) => s.tool))];
+		parameters: ProposeParams,
+		async execute(
+			_toolCallId: string,
+			params: Static<typeof ProposeParams>,
+			_signal: AbortSignal | undefined,
+			_onUpdate: AgentToolUpdateCallback | undefined,
+			ctx: ExtensionContext,
+		) {
+			const store = getStore(ctx.cwd);
+			const toolsRequired = [...new Set(params.steps.map((s) => s.tool))];
 			const plan = await store.create({
 				title: params.title,
 				steps: params.steps,
@@ -43,61 +78,58 @@ The plan will be presented to the user for approval before execution.`,
 				tools_required: toolsRequired,
 			});
 
-			// Emit event for UI
-			ctx.events?.emit("plans:proposed", plan);
-
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Plan created: ${plan.id}\nTitle: ${plan.title}\nStatus: proposed\nSteps: ${plan.steps.length}\nTools: ${toolsRequired.join(", ")}\n\nAwaiting approval.`,
-					},
-				],
-			};
+			return textResult(
+				`Plan created: ${plan.id}\nTitle: ${plan.title}\nStatus: proposed\nSteps: ${plan.steps.length}\nTools: ${toolsRequired.join(", ")}\n\nAwaiting approval.`,
+			);
 		},
 	});
 
 	// plan_list
-	ctx.registerTool?.({
+	pi.registerTool({
 		name: "plan_list",
+		label: "Plan List",
 		description: "List plans in the current project. Optionally filter by status.",
-		parameters: {
-			type: "object",
-			properties: {
-				status: { type: "string", description: "Filter by status (proposed, approved, executing, completed, failed, rejected, cancelled)" },
-			},
-		},
-		execute: async (params) => {
-			const plans = await store.list(params.status ? { status: params.status } : undefined);
+		parameters: ListParams,
+		async execute(
+			_toolCallId: string,
+			params: Static<typeof ListParams>,
+			_signal: AbortSignal | undefined,
+			_onUpdate: AgentToolUpdateCallback | undefined,
+			ctx: ExtensionContext,
+		) {
+			const store = getStore(ctx.cwd);
+			const plans = await store.list(params.status ? { status: params.status as PlanStatus } : undefined);
 			if (plans.length === 0) {
-				return { content: [{ type: "text", text: "No plans found." }] };
+				return textResult("No plans found.");
 			}
 			const text = plans
 				.map((p) => `${p.id} [${p.status}] ${p.title} (${p.steps.length} steps, v${p.version})`)
 				.join("\n");
-			return { content: [{ type: "text", text }] };
+			return textResult(text);
 		},
 	});
 
 	// plan_get
-	ctx.registerTool?.({
+	pi.registerTool({
 		name: "plan_get",
+		label: "Plan Get",
 		description: "Get full details of a plan by ID.",
-		parameters: {
-			type: "object",
-			properties: {
-				id: { type: "string", description: "Plan ID (e.g., PLAN-a1b2c3d4)" },
-			},
-			required: ["id"],
-		},
-		execute: async (params) => {
+		parameters: IdParams,
+		async execute(
+			_toolCallId: string,
+			params: Static<typeof IdParams>,
+			_signal: AbortSignal | undefined,
+			_onUpdate: AgentToolUpdateCallback | undefined,
+			ctx: ExtensionContext,
+		) {
+			const store = getStore(ctx.cwd);
 			const plan = await store.get(params.id);
 			if (!plan) {
-				return { content: [{ type: "text", text: `Plan ${params.id} not found.` }], isError: true };
+				return textResult(`Plan ${params.id} not found.`, true);
 			}
 			const lines = [
 				`# ${plan.title}`,
-				``,
+				"",
 				`- **ID**: ${plan.id}`,
 				`- **Status**: ${plan.status}`,
 				`- **Version**: ${plan.version}`,
@@ -105,67 +137,68 @@ The plan will be presented to the user for approval before execution.`,
 				`- **Tools**: ${plan.tools_required.join(", ")}`,
 				plan.executor_model ? `- **Executor model**: ${plan.executor_model}` : null,
 				plan.result_summary ? `- **Result**: ${plan.result_summary}` : null,
-				``,
-				`## Steps`,
-				...plan.steps.map((s, i) => `${i + 1}. ${s.description} (${s.tool}: ${s.operation}${s.target ? ` → ${s.target}` : ""})`),
+				"",
+				"## Steps",
+				...plan.steps.map(
+					(s, i) =>
+						`${i + 1}. ${s.description} (${s.tool}: ${s.operation}${s.target ? ` → ${s.target}` : ""})`,
+				),
 			].filter(Boolean);
 
 			if (plan.context) {
 				lines.push("", "## Context", plan.context);
 			}
 
-			return { content: [{ type: "text", text: lines.join("\n") }] };
+			return textResult(lines.join("\n"));
 		},
 	});
 
 	// plan_approve
-	ctx.registerTool?.({
+	pi.registerTool({
 		name: "plan_approve",
+		label: "Plan Approve",
 		description: "Approve a proposed plan for execution.",
-		parameters: {
-			type: "object",
-			properties: {
-				id: { type: "string", description: "Plan ID to approve" },
-			},
-			required: ["id"],
-		},
-		execute: async (params) => {
+		parameters: IdParams,
+		async execute(
+			_toolCallId: string,
+			params: Static<typeof IdParams>,
+			_signal: AbortSignal | undefined,
+			_onUpdate: AgentToolUpdateCallback | undefined,
+			ctx: ExtensionContext,
+		) {
+			const store = getStore(ctx.cwd);
 			try {
 				const plan = await store.approve(params.id);
-				ctx.events?.emit("plans:approved", plan);
-				return { content: [{ type: "text", text: `Plan ${plan.id} approved. Status: ${plan.status}` }] };
-			} catch (err: any) {
-				return { content: [{ type: "text", text: `Failed to approve: ${err.message}` }], isError: true };
+				return textResult(`Plan ${plan.id} approved. Status: ${plan.status}`);
+			} catch (err: unknown) {
+				const msg = err instanceof Error ? err.message : String(err);
+				return textResult(`Failed to approve: ${msg}`, true);
 			}
 		},
 	});
 
 	// plan_reject
-	ctx.registerTool?.({
+	pi.registerTool({
 		name: "plan_reject",
+		label: "Plan Reject",
 		description: "Reject a proposed plan with optional feedback.",
-		parameters: {
-			type: "object",
-			properties: {
-				id: { type: "string", description: "Plan ID to reject" },
-				feedback: { type: "string", description: "Rejection reason or feedback for re-planning" },
-			},
-			required: ["id"],
-		},
-		execute: async (params) => {
+		parameters: RejectParams,
+		async execute(
+			_toolCallId: string,
+			params: Static<typeof RejectParams>,
+			_signal: AbortSignal | undefined,
+			_onUpdate: AgentToolUpdateCallback | undefined,
+			ctx: ExtensionContext,
+		) {
+			const store = getStore(ctx.cwd);
 			try {
 				const plan = await store.reject(params.id, params.feedback);
-				ctx.events?.emit("plans:rejected", plan);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Plan ${plan.id} rejected.${params.feedback ? ` Feedback: ${params.feedback}` : ""}`,
-						},
-					],
-				};
-			} catch (err: any) {
-				return { content: [{ type: "text", text: `Failed to reject: ${err.message}` }], isError: true };
+				return textResult(
+					`Plan ${plan.id} rejected.${params.feedback ? ` Feedback: ${params.feedback}` : ""}`,
+				);
+			} catch (err: unknown) {
+				const msg = err instanceof Error ? err.message : String(err);
+				return textResult(`Failed to reject: ${msg}`, true);
 			}
 		},
 	});

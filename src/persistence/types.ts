@@ -51,3 +51,15 @@ export interface Plan {
 export interface PlanListOptions {
 	status?: PlanStatus | PlanStatus[];
 }
+
+export interface PlannerConfig {
+	guardedTools: string[];
+	stale_after_days: number;
+	executor_timeout_minutes: number;
+}
+
+export const DEFAULT_CONFIG: PlannerConfig = {
+	guardedTools: [],
+	stale_after_days: 30,
+	executor_timeout_minutes: 30,
+};
