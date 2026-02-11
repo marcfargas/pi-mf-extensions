@@ -1,5 +1,6 @@
 /**
  * Plan tools: plan_propose, plan_list, plan_get, plan_approve, plan_reject.
+ * (plan_mode is registered in index.ts where mode state lives.)
  *
  * Registered via pi.registerTool() with TypeBox schemas.
  */

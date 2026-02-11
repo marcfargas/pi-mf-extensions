@@ -4,7 +4,8 @@
  * Extension entry point. Registers plan tools, commands, and event hooks.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
+import { Type, type Static } from "@sinclair/typebox";
 import { registerPlanTools } from "./tools/index.js";
 import { PlanStore } from "./persistence/plan-store.js";
 import { loadConfig } from "./persistence/config.js";
@@ -18,6 +19,7 @@ import { DEFAULT_CONFIG, type Plan, type PlannerConfig } from "./persistence/typ
 const PLAN_MODE_READONLY = new Set([
 	"read", "bash", "grep", "find", "ls",
 	"plan_propose", "plan_list", "plan_get", "plan_approve", "plan_reject",
+	"plan_mode",
 ]);
 
 /** State persisted across sessions via appendEntry. */
@@ -176,6 +178,54 @@ export default function activate(pi: ExtensionAPI): void {
 
 	// Register plan tools (with execution callback)
 	registerPlanTools(pi, ensureStore, startExecution);
+
+	// plan_mode — agent-callable tool to enter/exit plan mode
+	const PlanModeParams = Type.Object({
+		enable: Type.Boolean({ description: "true to enter plan mode (read-only + plan tools), false to exit" }),
+	});
+
+	pi.registerTool({
+		name: "plan_mode",
+		label: "Plan Mode",
+		description: `Enter or exit plan mode. In plan mode, only read-only tools and plan tools are available — file writes, edits, and destructive bash are blocked.
+
+Enter plan mode when:
+- The user asks to plan, prepare, or think through consequential actions
+- You need to research before proposing external actions (Odoo, email, calendar, deploys)
+- The conversation shifts from "doing" to "planning"
+
+Exit plan mode when:
+- The plan is approved/rejected and you need to resume normal work
+- The user asks you to do something that requires full tool access
+- Planning is done and you're back to development tasks`,
+		parameters: PlanModeParams,
+		async execute(
+			_toolCallId: string,
+			params: Static<typeof PlanModeParams>,
+			_signal: AbortSignal | undefined,
+			_onUpdate: AgentToolUpdateCallback | undefined,
+			ctx: ExtensionContext,
+		): Promise<AgentToolResult<unknown>> {
+			const wasInPlanMode = planMode;
+			const wantPlanMode = params.enable;
+
+			if (wasInPlanMode === wantPlanMode) {
+				return {
+					content: [{ type: "text", text: `Already ${wantPlanMode ? "in" : "out of"} plan mode. No change.` }],
+					details: {},
+				} as AgentToolResult<unknown>;
+			}
+
+			togglePlanMode(ctx);
+
+			return {
+				content: [{ type: "text", text: wantPlanMode
+					? "Plan mode enabled. Read-only exploration + plan tools only. Use plan_propose to create plans."
+					: "Plan mode disabled. Full tool access restored." }],
+				details: {},
+			} as AgentToolResult<unknown>;
+		},
+	});
 
 	// Register mode hooks (before_agent_start, tool_call logging/blocking)
 	registerModeHooks(pi, ensureStore, () => guardedTools, getMode);

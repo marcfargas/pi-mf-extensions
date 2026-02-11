@@ -13,6 +13,17 @@ import type { PlanStore } from "../persistence/plan-store.js";
 export type PlannerMode = "plan" | "normal";
 
 /**
+ * Tools blocked in plan mode (beyond bash filtering).
+ * setActiveTools() only hides tools from the prompt — it doesn't prevent execution.
+ * This list is the enforcement layer.
+ */
+const PLAN_MODE_BLOCKED_TOOLS = new Set([
+	"write", "edit",
+	// subagent tools that could modify state
+	"todo",
+]);
+
+/**
  * Safe bash commands allowed in plan mode.
  * Everything else is blocked.
  */
@@ -41,15 +52,31 @@ const SAFE_BASH_PATTERNS: RegExp[] = [
  */
 const DESTRUCTIVE_PATTERNS: RegExp[] = [
 	/\brm\b/i, /\brmdir\b/i, /\bmv\b/i,
-	/(^|[^<])>(?!>)/, />>/,
 	/\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|stash|cherry-pick)/i,
 	/\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
 	/\bsudo\b/i, /\bkill\b/i, /\bpkill\b/i,
 ];
 
+/**
+ * Check if a command contains dangerous redirects (file writes via > or >>).
+ * Allows safe patterns: 2>/dev/null, 2>&1, >/dev/null
+ */
+export function hasDangerousRedirect(command: string): boolean {
+	// Strip safe redirect patterns before checking
+	const cleaned = command
+		.replace(/\d*>\s*\/dev\/null/g, "")   // N>/dev/null
+		.replace(/\d*>&\d+/g, "")              // N>&M (e.g., 2>&1)
+		.replace(/&>\s*\/dev\/null/g, "");     // &>/dev/null
+	// Check for remaining redirects
+	return /(?:^|[^<])>/.test(cleaned);
+}
+
 export function isSafeBashCommand(command: string): boolean {
+	// Check explicit destructive patterns first
 	const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
 	if (isDestructive) return false;
+	// Check for dangerous redirects (> or >> writing to files, but not 2>/dev/null etc.)
+	if (hasDangerousRedirect(command)) return false;
 	return SAFE_BASH_PATTERNS.some((p) => p.test(command));
 }
 
@@ -113,10 +140,18 @@ export function registerModeHooks(
 	});
 
 	// tool_call hook:
-	// 1. In plan mode: block destructive bash commands
+	// 1. In plan mode: block write/edit and destructive bash commands
 	// 2. Phase A guarded tools: log but don't block
 	pi.on("tool_call", async (event, ctx) => {
 		const mode = getMode();
+
+		// Plan mode: block write/edit and other state-modifying tools
+		if (mode === "plan" && PLAN_MODE_BLOCKED_TOOLS.has(event.toolName)) {
+			return {
+				block: true,
+				reason: `Plan mode: "${event.toolName}" is blocked (read-only mode). Exit plan mode first with plan_mode(enable: false).`,
+			};
+		}
 
 		// Plan mode: block destructive bash
 		if (mode === "plan" && event.toolName === "bash") {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isSafeBashCommand } from "../../src/mode/hooks.js";
+import { isSafeBashCommand, hasDangerousRedirect } from "../../src/mode/hooks.js";
 
 describe("isSafeBashCommand", () => {
 	describe("safe commands (allowed in plan mode)", () => {
@@ -88,6 +88,39 @@ describe("isSafeBashCommand", () => {
 		}
 	});
 
+	describe("safe redirects (allowed in plan mode)", () => {
+		const safeRedirects = [
+			"cat file.txt 2>/dev/null",
+			"ls -la 2>/dev/null",
+			"grep pattern file 2>/dev/null",
+			"cat file.txt 2>&1",
+			"find . -name '*.ts' 2>/dev/null",
+			"cat file 2> /dev/null",
+			"echo test 2>/dev/null",
+		];
+
+		for (const cmd of safeRedirects) {
+			it(`allows safe redirect: ${cmd}`, () => {
+				expect(isSafeBashCommand(cmd)).toBe(true);
+			});
+		}
+	});
+
+	describe("dangerous redirects (blocked in plan mode)", () => {
+		const dangerousRedirects = [
+			"echo hello > file.txt",
+			"cat a.txt > b.txt",
+			"echo data >> log.txt",
+			"ls > listing.txt",
+		];
+
+		for (const cmd of dangerousRedirects) {
+			it(`blocks dangerous redirect: ${cmd}`, () => {
+				expect(isSafeBashCommand(cmd)).toBe(false);
+			});
+		}
+	});
+
 	describe("unknown commands (blocked by default)", () => {
 		const unknownCmds = [
 			"python script.py",
@@ -102,5 +135,31 @@ describe("isSafeBashCommand", () => {
 				expect(isSafeBashCommand(cmd)).toBe(false);
 			});
 		}
+	});
+});
+
+describe("hasDangerousRedirect", () => {
+	it("returns false for safe stderr redirects", () => {
+		expect(hasDangerousRedirect("cat file 2>/dev/null")).toBe(false);
+		expect(hasDangerousRedirect("cmd 2>&1")).toBe(false);
+		expect(hasDangerousRedirect("cmd &>/dev/null")).toBe(false);
+		expect(hasDangerousRedirect("cmd 2> /dev/null")).toBe(false);
+	});
+
+	it("returns true for file-writing redirects", () => {
+		expect(hasDangerousRedirect("echo hello > file.txt")).toBe(true);
+		expect(hasDangerousRedirect("cat a > b")).toBe(true);
+		expect(hasDangerousRedirect("ls > listing.txt")).toBe(true);
+	});
+
+	it("returns false for commands with no redirects", () => {
+		expect(hasDangerousRedirect("ls -la")).toBe(false);
+		expect(hasDangerousRedirect("cat file.txt")).toBe(false);
+		expect(hasDangerousRedirect("grep pattern src/")).toBe(false);
+	});
+
+	it("returns true for append redirects to files", () => {
+		// Note: >> is handled by hasDangerousRedirect since it contains >
+		expect(hasDangerousRedirect("echo data >> log.txt")).toBe(true);
 	});
 });
