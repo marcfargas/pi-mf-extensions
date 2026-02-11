@@ -7,12 +7,14 @@
 import type { ExtensionAPI, ExtensionContext, AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
 import { registerPlanTools } from "./tools/index.js";
+import { registerSkillSafetyTool } from "./tools/safety.js";
 import { PlanStore } from "./persistence/plan-store.js";
 import { loadConfig } from "./persistence/config.js";
 import { registerModeHooks, type PlannerMode } from "./mode/hooks.js";
 import { executePlan } from "./executor/runner.js";
 import { findStalledPlans, formatStalledPlanMessage } from "./executor/stalled.js";
 import { countCompletedSteps } from "./executor/checkpoint.js";
+import { SafetyRegistry } from "./safety/registry.js";
 import { DEFAULT_CONFIG, type Plan, type PlannerConfig } from "./persistence/types.js";
 
 // Read-only tools allowed in plan mode (plus plan CRUD tools added dynamically)
@@ -20,6 +22,7 @@ const PLAN_MODE_READONLY = new Set([
 	"read", "bash", "grep", "find", "ls",
 	"plan_propose", "plan_list", "plan_get", "plan_approve", "plan_reject",
 	"plan_mode",
+	"plan_skill_safety",
 ]);
 
 /** State persisted across sessions via appendEntry. */
@@ -39,6 +42,9 @@ export default function activate(pi: ExtensionAPI): void {
 	// Extension state
 	let planMode = false;
 	let allToolNames: string[] | undefined; // snapshot of all tools before entering plan mode
+
+	// Safety registry — populated by agent calling plan_skill_safety
+	const safetyRegistry = new SafetyRegistry();
 
 	// Track active executions to avoid duplicates
 	const activeExecutions = new Set<string>();
@@ -179,6 +185,9 @@ export default function activate(pi: ExtensionAPI): void {
 	// Register plan tools (with execution callback)
 	registerPlanTools(pi, ensureStore, startExecution);
 
+	// Register skill safety tool
+	registerSkillSafetyTool(pi, safetyRegistry);
+
 	// plan_mode — agent-callable tool to enter/exit plan mode
 	const PlanModeParams = Type.Object({
 		enable: Type.Boolean({ description: "true to enter plan mode (read-only + plan tools), false to exit" }),
@@ -228,7 +237,7 @@ Exit plan mode when:
 	});
 
 	// Register mode hooks (before_agent_start, tool_call logging/blocking)
-	registerModeHooks(pi, ensureStore, () => guardedTools, getMode);
+	registerModeHooks(pi, ensureStore, () => guardedTools, getMode, () => safetyRegistry);
 
 	// /plan — toggle plan mode + manage pending plans
 	pi.registerCommand("plan", {
@@ -313,6 +322,35 @@ Exit plan mode when:
 
 			await viewPlanDetail(plan, s, ctx, startExecution);
 			await updateStatus(ctx);
+		},
+	});
+
+	// /safety — inspect the safety registry
+	pi.registerCommand("safety", {
+		description: "Inspect the skill safety registry",
+		handler: async (_args, ctx) => {
+			const entries = safetyRegistry.inspect();
+			if (entries.length === 0) {
+				ctx.ui.notify("Safety registry is empty. No skills have reported safety classifications yet.", "info");
+				return;
+			}
+
+			const items = entries.map((e) => `${e.tool} (${e.patterns} patterns, default: ${e.default})`);
+			const choice = await ctx.ui.select("Registered tools:", items);
+			if (!choice) return;
+
+			// Extract tool name from the choice string
+			const toolName = choice.split(" (")[0];
+			const entry = safetyRegistry.inspectTool(toolName);
+			if (!entry) return;
+
+			const lines = [
+				`Tool: ${toolName}`,
+				`Default: ${entry.default}`,
+				`Patterns:`,
+				...entry.commands.map((c) => `  ${c.level === "READ" ? "✅" : "❌"} ${c.pattern} → ${c.level}`),
+			];
+			ctx.ui.notify(lines.join("\n"), "info");
 		},
 	});
 

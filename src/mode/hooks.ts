@@ -1,14 +1,16 @@
 /**
  * Mode switching and tool_call hooks.
  *
- * - before_agent_start: injects plan-mode context (SKILL.md guidance + tool inventory)
- * - tool_call: Phase A logging-only for guarded tools; blocks destructive bash in plan mode
+ * - before_agent_start: injects plan-mode context + skill safety extraction instruction
+ * - tool_call: blocks destructive bash in plan mode, with safety registry override
+ *   for skill operations classified as READ
  *
  * Phase C will upgrade tool_call to enforcement mode for executor agents.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { PlanStore } from "../persistence/plan-store.js";
+import type { SafetyRegistry } from "../safety/registry.js";
 
 export type PlannerMode = "plan" | "normal";
 
@@ -85,8 +87,9 @@ export function registerModeHooks(
 	getStore: (cwd: string) => PlanStore,
 	getGuardedTools: () => string[],
 	getMode: () => PlannerMode,
+	getRegistry: () => SafetyRegistry,
 ): void {
-	// before_agent_start: inject plan-mode awareness into agent prompt
+	// before_agent_start: inject plan-mode awareness + skill safety extraction instruction
 	pi.on("before_agent_start", async (_event, ctx) => {
 		const store = getStore(ctx.cwd);
 		const mode = getMode();
@@ -101,7 +104,7 @@ export function registerModeHooks(
 			parts.push(
 				"[PLAN MODE ACTIVE] You are in plan mode — read-only exploration + plan tools only.",
 				"You CANNOT use: edit, write (file modifications are disabled).",
-				"Bash is restricted to read-only commands.",
+				"Bash is restricted to read-only commands (but READ operations from skills with safety classifications are allowed — see SKILL SAFETY below).",
 				"Use plan_propose to create plans for actions that need approval.",
 			);
 		}
@@ -125,6 +128,45 @@ export function registerModeHooks(
 		if (guardedToolsList.length > 0) {
 			parts.push(
 				`[PLAN MODE] Guarded tools (require a plan): ${guardedToolsList.join(", ")}`,
+			);
+		}
+
+		// Skill safety extraction instruction — always injected so the registry
+		// populates regardless of when skills are loaded relative to plan mode.
+		parts.push(
+			"",
+			"[SKILL SAFETY] When you read (load) a skill that classifies operations with safety levels",
+			"(e.g., READ, WRITE, DESTRUCTIVE, EXPENSIVE, SECURITY, FORBIDDEN), extract those classifications",
+			"and call plan_skill_safety with command-matching glob patterns.",
+			"",
+			"Use glob patterns that match how the CLI is actually invoked in bash.",
+			"Use * as wildcard. Patterns MUST start with the tool/CLI name.",
+			"Collapse all non-READ levels to WRITE. Only READ and WRITE are valid.",
+			"If in doubt, classify as WRITE.",
+			"",
+			"Example:",
+			"  plan_skill_safety({",
+			"    tool: \"go-gmail\",",
+			"    commands: {",
+			"      \"npx go-gmail * search *\": \"READ\",",
+			"      \"npx go-gmail * get *\": \"READ\",",
+			"      \"npx go-gmail * thread *\": \"READ\",",
+			"      \"npx go-gmail * send *\": \"WRITE\",",
+			"      \"npx go-gmail * draft *\": \"WRITE\"",
+			"    },",
+			"    default: \"WRITE\"",
+			"  })",
+			"",
+			"Call once per tool/CLI after reading its skill documentation.",
+		);
+
+		// Show current registry state so agent knows what's already registered
+		const registry = getRegistry();
+		if (registry.size > 0) {
+			const entries = registry.inspect();
+			parts.push(
+				"",
+				`[SKILL SAFETY] Currently registered: ${entries.map((e) => `${e.tool} (${e.patterns} patterns)`).join(", ")}`,
 			);
 		}
 
@@ -153,9 +195,29 @@ export function registerModeHooks(
 			};
 		}
 
-		// Plan mode: block destructive bash
+		// Plan mode: filter bash commands through safety registry, then existing allowlist
 		if (mode === "plan" && event.toolName === "bash") {
 			const command = (event.input as { command?: string }).command ?? "";
+
+			// Check safety registry first — skills that reported their safety levels
+			// get intelligent filtering (READ operations allowed, WRITE blocked)
+			const registry = getRegistry();
+			const registryLevel = registry.resolve(command);
+
+			if (registryLevel === "READ") {
+				// Registry says READ — allow this command in plan mode
+				return undefined;
+			}
+
+			if (registryLevel === "WRITE") {
+				// Registry says WRITE — block with informative message
+				return {
+					block: true,
+					reason: `Plan mode: WRITE operation blocked (per skill safety registry). Propose a plan for this action.\nCommand: ${command}`,
+				};
+			}
+
+			// No registry match — fall through to existing allowlist/denylist
 			if (!isSafeBashCommand(command)) {
 				return {
 					block: true,

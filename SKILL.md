@@ -39,6 +39,32 @@ Do NOT plan for normal development work:
 4. Wait for human approval (user uses `/plan` or `/plans` in TUI, or `plan_approve` tool)
 5. Exit plan mode: `plan_mode(enable: false)`
 
+## Skill Safety Registry
+
+When you read a skill that classifies operations with safety levels (READ, WRITE, DESTRUCTIVE, etc.), **call `plan_skill_safety`** to register those classifications. This enables intelligent plan mode filtering — READ operations (search, list, get) will be allowed in plan mode instead of blocked.
+
+Extract command patterns from the skill docs and map them to READ or WRITE:
+- **READ**: pure queries with no side effects (search, list, get, describe, show)
+- **WRITE**: everything else — collapse DESTRUCTIVE/EXPENSIVE/SECURITY/FORBIDDEN to WRITE
+
+Use glob patterns with `*` as wildcard. Patterns must start with the tool/CLI name.
+
+```
+plan_skill_safety({
+  tool: "go-gmail",
+  commands: {
+    "npx go-gmail * search *": "READ",
+    "npx go-gmail * get *": "READ",
+    "npx go-gmail * thread *": "READ",
+    "npx go-gmail * send *": "WRITE",
+    "npx go-gmail * draft *": "WRITE"
+  },
+  default: "WRITE"
+})
+```
+
+Call once per tool/CLI after reading its skill documentation. If in doubt, classify as WRITE.
+
 ## Available Executor Tools
 
 Check your context for the current tool inventory. Common tools:
