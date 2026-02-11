@@ -185,7 +185,7 @@ npm run typecheck   # tsc --noEmit
 
 ## Status
 
-Phase A (core) is ~95% complete. See [VISION.md](VISION.md) for the full design document and roadmap.
+Phase A (core) is ~95% complete.
 
 ## License
 
