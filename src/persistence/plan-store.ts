@@ -163,6 +163,18 @@ export class PlanStore {
 		});
 	}
 
+	async delete(id: string): Promise<void> {
+		await this.loadCache();
+		const plan = this.cache.get(id);
+		if (!plan) throw new Error(`Plan ${id} not found`);
+		if (plan.status === "executing") {
+			throw new Error(`Cannot delete plan ${id} while executing`);
+		}
+		const filePath = this.planPath(id);
+		await fs.promises.unlink(filePath);
+		this.cache.delete(id);
+	}
+
 	// ── Internals ───────────────────────────────────────────
 
 	private planPath(id: string): string {

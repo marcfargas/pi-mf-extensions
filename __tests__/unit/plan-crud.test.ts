@@ -163,6 +163,74 @@ describe("PlanStore", () => {
 			expect(p3.version).toBe(3);
 		});
 	});
+
+	describe("delete", () => {
+		it("removes plan file from disk and cache", async () => {
+			const plan = await store.create({
+				title: "Disposable",
+				steps: [{ description: "x", tool: "t", operation: "o" }],
+				tools_required: ["t"],
+			});
+
+			await store.delete(plan.id);
+
+			// Gone from cache
+			const result = await store.get(plan.id);
+			expect(result).toBeNull();
+
+			// Gone from disk
+			const filePath = path.join(tmpDir, ".pi", "plans", `${plan.id}.md`);
+			expect(fs.existsSync(filePath)).toBe(false);
+
+			// Gone from list
+			const all = await store.list();
+			expect(all.find((p) => p.id === plan.id)).toBeUndefined();
+		});
+
+		it("throws on non-existent plan", async () => {
+			await expect(store.delete("PLAN-00000000")).rejects.toThrow("not found");
+		});
+
+		it("throws when deleting an executing plan", async () => {
+			const plan = await store.create({
+				title: "Running",
+				steps: [{ description: "x", tool: "t", operation: "o" }],
+				tools_required: ["t"],
+			});
+			await store.approve(plan.id);
+			await store.markExecuting(plan.id);
+
+			await expect(store.delete(plan.id)).rejects.toThrow("executing");
+		});
+
+		it("allows deleting terminal-status plans", async () => {
+			const plans = await Promise.all(
+				[0, 1, 2, 3].map((i) =>
+					store.create({
+						title: `Plan ${i}`,
+						steps: [{ description: "x", tool: "t", operation: "o" }],
+						tools_required: ["t"],
+					}),
+				),
+			);
+
+			await store.reject(plans[0].id, "nope");
+			await store.approve(plans[1].id);
+			await store.markExecuting(plans[1].id);
+			await store.markCompleted(plans[1].id, "done");
+			await store.approve(plans[2].id);
+			await store.markExecuting(plans[2].id);
+			await store.markFailed(plans[2].id, "oops");
+			await store.cancel(plans[3].id);
+
+			for (const p of plans) {
+				await expect(store.delete(p.id)).resolves.toBeUndefined();
+			}
+
+			const remaining = await store.list();
+			expect(remaining).toHaveLength(0);
+		});
+	});
 });
 
 describe("serialization", () => {

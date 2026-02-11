@@ -379,19 +379,20 @@ async function viewPlanDetail(
 	const actions: string[] = [];
 	switch (plan.status) {
 		case "proposed":
-			actions.push("Approve", "Approve & Execute", "Reject", "Back");
+			actions.push("Approve", "Approve & Execute", "Reject", "Delete", "Back");
 			break;
 		case "approved":
-			actions.push("Execute", "Cancel", "Back");
+			actions.push("Execute", "Cancel", "Delete", "Back");
 			break;
 		case "stalled":
-			actions.push("Mark as Failed", "Cancel", "Back");
+			actions.push("Mark as Failed", "Cancel", "Delete", "Back");
 			break;
 		case "executing":
 			actions.push("Back");
 			break;
 		default:
-			actions.push("Back");
+			// Terminal statuses: completed, failed, rejected, cancelled
+			actions.push("Delete", "Back");
 			break;
 	}
 
@@ -421,6 +422,12 @@ async function viewPlanDetail(
 	} else if (action === "Mark as Failed") {
 		await store.markFailed(plan.id, "Marked as failed after stalling");
 		ctx.ui.notify(`Plan ${plan.id} marked as failed.`, "info");
+	} else if (action === "Delete") {
+		const confirmed = await ctx.ui.confirm("Delete plan?", `Permanently delete ${plan.id}: ${plan.title}`);
+		if (confirmed) {
+			await store.delete(plan.id);
+			ctx.ui.notify(`Plan ${plan.id} deleted.`, "info");
+		}
 	}
 }
 
