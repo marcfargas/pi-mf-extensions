@@ -9,6 +9,8 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { PlanStore } from "../persistence/plan-store.js";
 import type { PlanStatus } from "../persistence/types.js";
 
+type ExecutionStarter = (planId: string, ctx: ExtensionContext) => Promise<void>;
+
 // ── Schemas ─────────────────────────────────────────────────
 
 const StepSchema = Type.Object({
@@ -52,6 +54,7 @@ function textResult<T = unknown>(text: string, isError = false): AgentToolResult
 export function registerPlanTools(
 	pi: ExtensionAPI,
 	getStore: (cwd: string) => PlanStore,
+	onApprove?: ExecutionStarter,
 ): void {
 	// plan_propose
 	pi.registerTool({
@@ -79,7 +82,7 @@ The plan will be presented to the user for approval before execution.`,
 			});
 
 			return textResult(
-				`Plan created: ${plan.id}\nTitle: ${plan.title}\nStatus: proposed\nSteps: ${plan.steps.length}\nTools: ${toolsRequired.join(", ")}\n\nAwaiting approval.`,
+				`Plan created: ${plan.id}\nTitle: ${plan.title}\nStatus: proposed\nSteps: ${plan.steps.length}\nTools: ${toolsRequired.join(", ")}\n\nAwaiting approval. User can approve via /plan or /plans command.`,
 			);
 		},
 	});
@@ -157,7 +160,7 @@ The plan will be presented to the user for approval before execution.`,
 	pi.registerTool({
 		name: "plan_approve",
 		label: "Plan Approve",
-		description: "Approve a proposed plan for execution.",
+		description: "Approve a proposed plan for execution. Once approved, the plan will be executed automatically.",
 		parameters: IdParams,
 		async execute(
 			_toolCallId: string,
@@ -169,7 +172,14 @@ The plan will be presented to the user for approval before execution.`,
 			const store = getStore(ctx.cwd);
 			try {
 				const plan = await store.approve(params.id);
-				return textResult(`Plan ${plan.id} approved. Status: ${plan.status}`);
+
+				// Trigger execution if callback available
+				if (onApprove) {
+					// Don't await — execution runs in background
+					onApprove(plan.id, ctx).catch(() => {});
+				}
+
+				return textResult(`Plan ${plan.id} approved. Status: ${plan.status}. Execution starting...`);
 			} catch (err: unknown) {
 				const msg = err instanceof Error ? err.message : String(err);
 				return textResult(`Failed to approve: ${msg}`, true);

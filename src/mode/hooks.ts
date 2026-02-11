@@ -2,7 +2,7 @@
  * Mode switching and tool_call hooks.
  *
  * - before_agent_start: injects plan-mode context (SKILL.md guidance + tool inventory)
- * - tool_call: Phase A logging-only — logs guarded tool calls without blocking
+ * - tool_call: Phase A logging-only for guarded tools; blocks destructive bash in plan mode
  *
  * Phase C will upgrade tool_call to enforcement mode for executor agents.
  */
@@ -10,20 +10,74 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { PlanStore } from "../persistence/plan-store.js";
 
+export type PlannerMode = "plan" | "normal";
+
+/**
+ * Safe bash commands allowed in plan mode.
+ * Everything else is blocked.
+ */
+const SAFE_BASH_PATTERNS: RegExp[] = [
+	/^\s*cat\b/, /^\s*head\b/, /^\s*tail\b/, /^\s*less\b/, /^\s*more\b/,
+	/^\s*grep\b/, /^\s*rg\b/, /^\s*find\b/, /^\s*fd\b/,
+	/^\s*ls\b/, /^\s*exa\b/, /^\s*tree\b/,
+	/^\s*pwd\b/, /^\s*echo\b/, /^\s*printf\b/,
+	/^\s*wc\b/, /^\s*sort\b/, /^\s*uniq\b/, /^\s*diff\b/,
+	/^\s*file\b/, /^\s*stat\b/, /^\s*du\b/, /^\s*df\b/,
+	/^\s*which\b/, /^\s*whereis\b/, /^\s*type\b/,
+	/^\s*env\b/, /^\s*printenv\b/,
+	/^\s*uname\b/, /^\s*whoami\b/, /^\s*id\b/, /^\s*date\b/,
+	/^\s*ps\b/, /^\s*uptime\b/,
+	/^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)/i,
+	/^\s*git\s+ls-/i,
+	/^\s*npm\s+(list|ls|view|info|search|outdated|audit)/i,
+	/^\s*node\s+--version/i, /^\s*python\s+--version/i,
+	/^\s*jq\b/, /^\s*sed\s+-n/i, /^\s*awk\b/, /^\s*bat\b/,
+	/^\s*curl\s/i,
+];
+
+/**
+ * Destructive commands that are always blocked in plan mode,
+ * even if they look like they'd match a safe pattern.
+ */
+const DESTRUCTIVE_PATTERNS: RegExp[] = [
+	/\brm\b/i, /\brmdir\b/i, /\bmv\b/i,
+	/(^|[^<])>(?!>)/, />>/,
+	/\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|stash|cherry-pick)/i,
+	/\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
+	/\bsudo\b/i, /\bkill\b/i, /\bpkill\b/i,
+];
+
+export function isSafeBashCommand(command: string): boolean {
+	const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
+	if (isDestructive) return false;
+	return SAFE_BASH_PATTERNS.some((p) => p.test(command));
+}
+
 export function registerModeHooks(
 	pi: ExtensionAPI,
 	getStore: (cwd: string) => PlanStore,
 	getGuardedTools: () => string[],
+	getMode: () => PlannerMode,
 ): void {
 	// before_agent_start: inject plan-mode awareness into agent prompt
 	pi.on("before_agent_start", async (_event, ctx) => {
 		const store = getStore(ctx.cwd);
+		const mode = getMode();
 
 		// Check for pending plans to surface
 		const proposed = await store.list({ status: "proposed" });
 		const executing = await store.list({ status: "executing" });
 
 		const parts: string[] = [];
+
+		if (mode === "plan") {
+			parts.push(
+				"[PLAN MODE ACTIVE] You are in plan mode — read-only exploration + plan tools only.",
+				"You CANNOT use: edit, write (file modifications are disabled).",
+				"Bash is restricted to read-only commands.",
+				"Use plan_propose to create plans for actions that need approval.",
+			);
+		}
 
 		if (proposed.length > 0) {
 			parts.push(
@@ -58,33 +112,60 @@ export function registerModeHooks(
 		};
 	});
 
-	// tool_call: Phase A logging-only hook
-	// When guardedTools is configured, log (but don't block) calls to guarded tools
-	// that happen outside an approved plan.
+	// tool_call hook:
+	// 1. In plan mode: block destructive bash commands
+	// 2. Phase A guarded tools: log but don't block
 	pi.on("tool_call", async (event, ctx) => {
+		const mode = getMode();
+
+		// Plan mode: block destructive bash
+		if (mode === "plan" && event.toolName === "bash") {
+			const command = (event.input as { command?: string }).command ?? "";
+			if (!isSafeBashCommand(command)) {
+				return {
+					block: true,
+					reason: `Plan mode: command blocked (not allowlisted). Use /plan to exit plan mode first.\nCommand: ${command}`,
+				};
+			}
+		}
+
+		// Guarded tools logging (Phase A — log only, don't block)
 		const guardedToolsList = getGuardedTools();
 		if (guardedToolsList.length === 0) return;
 
-		// Check if this tool call matches a guarded tool
 		const toolName = event.toolName;
 		const isGuarded = guardedToolsList.some((g) => toolName === g || toolName.startsWith(`${g}_`));
 		if (!isGuarded) return;
 
-		// Phase A: log only, don't block
-		// In Phase C, this will check for an active approved plan and block if none exists
+		// Check if there's an active plan
 		const store = getStore(ctx.cwd);
 		const executingPlans = await store.list({ status: "executing" });
 		const hasActivePlan = executingPlans.length > 0;
 
 		if (!hasActivePlan) {
 			// Log that a guarded tool was called without an active plan
-			// This generates training data for tuning the SKILL.md guidance
 			console.error(
 				`[pi-planner] GUARDED TOOL CALL without plan: ${toolName} (input: ${JSON.stringify(event.input).slice(0, 200)})`,
 			);
 			// Phase C: return { block: true, reason: `Tool "${toolName}" requires an approved plan. Use plan_propose first.` };
 		}
 
-		return undefined; // Allow all tool calls in Phase A
+		return undefined;
+	});
+
+	// Filter stale plan mode context when not in plan mode
+	pi.on("context", async (event) => {
+		const mode = getMode();
+		if (mode === "plan") return;
+
+		return {
+			messages: event.messages.filter((m) => {
+				const msg = m as any;
+				if (msg.customType === "plan-mode-context" && typeof msg.content === "string") {
+					return !msg.content.includes("[PLAN MODE ACTIVE]");
+				}
+				return true;
+			}),
+		};
 	});
 }
