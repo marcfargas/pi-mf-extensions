@@ -264,7 +264,7 @@ export function parsePlan(content: string): Plan {
 
 	// Parse steps from body
 	const steps: PlanStep[] = [];
-	const stepsMatch = body.match(/## Steps\n([\s\S]*?)(?=\n## |\n*$)/);
+	const stepsMatch = body.match(/## Steps\n([\s\S]*?)(?=\n## |$)/);
 	if (stepsMatch) {
 		const stepLines = stepsMatch[1].trim().split("\n");
 		for (const line of stepLines) {
@@ -281,13 +281,13 @@ export function parsePlan(content: string): Plan {
 	}
 
 	// Parse context from body
-	const ctxMatch = body.match(/## Context\n([\s\S]*?)(?=\n## |\n*$)/);
+	const ctxMatch = body.match(/## Context\n([\s\S]*?)(?=\n## |$)/);
 	const context = ctxMatch ? ctxMatch[1].trim() : undefined;
 
 	// Remaining body (after steps and context sections)
 	let remaining = body;
-	if (stepsMatch) remaining = remaining.replace(/## Steps\n[\s\S]*?(?=\n## |\n*$)/, "");
-	if (ctxMatch) remaining = remaining.replace(/## Context\n[\s\S]*?(?=\n## |\n*$)/, "");
+	if (stepsMatch) remaining = remaining.replace(/## Steps\n[\s\S]*?(?=\n## |$)/, "");
+	if (ctxMatch) remaining = remaining.replace(/## Context\n[\s\S]*?(?=\n## |$)/, "");
 	remaining = remaining.trim();
 
 	return {

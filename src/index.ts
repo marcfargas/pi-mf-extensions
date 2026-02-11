@@ -14,17 +14,11 @@ import { findStalledPlans, formatStalledPlanMessage } from "./executor/stalled.j
 import { countCompletedSteps } from "./executor/checkpoint.js";
 import { DEFAULT_CONFIG, type Plan, type PlannerConfig } from "./persistence/types.js";
 
-// Tools available in plan mode (read-only + plan CRUD)
-const PLAN_MODE_TOOLS = [
+// Read-only tools allowed in plan mode (plus plan CRUD tools added dynamically)
+const PLAN_MODE_READONLY = new Set([
 	"read", "bash", "grep", "find", "ls",
 	"plan_propose", "plan_list", "plan_get", "plan_approve", "plan_reject",
-];
-
-// Normal mode: all tools (pi default)
-const NORMAL_MODE_TOOLS = [
-	"read", "bash", "edit", "write", "grep", "find", "ls",
-	"plan_propose", "plan_list", "plan_get", "plan_approve", "plan_reject",
-];
+]);
 
 /** State persisted across sessions via appendEntry. */
 export interface PlannerState {
@@ -42,6 +36,7 @@ export default function activate(pi: ExtensionAPI): void {
 
 	// Extension state
 	let planMode = false;
+	let allToolNames: string[] | undefined; // snapshot of all tools before entering plan mode
 
 	// Track active executions to avoid duplicates
 	const activeExecutions = new Set<string>();
@@ -73,10 +68,20 @@ export default function activate(pi: ExtensionAPI): void {
 
 	function applyMode(ctx: ExtensionContext): void {
 		if (planMode) {
-			pi.setActiveTools(PLAN_MODE_TOOLS);
-		} else {
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			// Snapshot all tools before restricting (if not already captured)
+			if (!allToolNames) {
+				allToolNames = pi.getActiveTools();
+			}
+			// Filter to read-only tools only
+			const planTools = allToolNames.filter((t) => PLAN_MODE_READONLY.has(t));
+			pi.setActiveTools(planTools);
+		} else if (allToolNames) {
+			// Restore the full tool set from snapshot
+			pi.setActiveTools(allToolNames);
+			allToolNames = undefined;
 		}
+		// If planMode is false and no snapshot exists, don't touch tools at all —
+		// this avoids wiping other extensions' tools on session_start.
 		updateStatus(ctx);
 	}
 
