@@ -4,6 +4,11 @@
   "description": "Safety classification registry for pi agent tool calls — glob-based READ/WRITE command matching",
   "author": "Marc Fargas",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcfargas/pi-mf-extensions.git",
+    "directory": "packages/pi-safety"
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts"

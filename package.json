@@ -1,7 +1,7 @@
 {
-  "name": "pi-planner-monorepo",
+  "name": "pi-mf-extensions",
   "private": true,
-  "description": "Plan-then-execute workflow and safety tools for pi agents",
+  "description": "Pi extensions by Marc Fargas — planner, safety, and more",
   "workspaces": [
     "packages/*"
   ],

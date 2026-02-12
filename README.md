@@ -1,53 +1,73 @@
-# pi-planner
+# pi-mf-extensions
 
-Monorepo for plan-then-execute workflow and safety tools for [pi](https://github.com/mariozechner/pi-coding-agent) agents.
+[Pi](https://github.com/mariozechner/pi-coding-agent) extensions by Marc Fargas.
 
-## Packages
+Small, focused extensions for the pi coding agent — published independently via npm, developed together in this monorepo.
 
-| Package | Version | Description |
-|---------|---------|-------------|
-| [`@marcfargas/pi-planner`](packages/pi-planner/) | 0.2.0 | Persistent, auditable plan-then-execute workflow — propose → review → approve → execute |
-| [`@marcfargas/pi-safety`](packages/pi-safety/) | 0.1.0 | Safety classification registry — glob-based READ/WRITE command matching |
-| [`@marcfargas/permission-gate`](packages/permission-gate/) | 0.1.0 | Tool permission enforcement extension _(skeleton)_ |
+## Extensions
+
+### [@marcfargas/pi-planner](packages/pi-planner/)
+
+Plan-then-execute workflow for agents that touch external systems. Agent proposes a plan → human reviews → approves → agent executes in-session.
+
+```bash
+npm install @marcfargas/pi-planner
+```
+
+```json
+{ "pi": { "extensions": ["@marcfargas/pi-planner"] } }
+```
+
+**Tools:** `plan_mode`, `plan_propose`, `plan_list`, `plan_get`, `plan_approve`, `plan_reject`, `plan_skill_safety`, `plan_run_script`
+**Commands:** `/plan`, `/plans`, `/safety`
+
+Plans persist as markdown in `.pi/plans/` — auditable, diffable, survives crashes. Includes plan mode (read-only tool restriction), skill safety registry (LLM-as-parser for READ/WRITE classification), retry/clone for failed plans, and crash recovery.
+
+→ [Full documentation](packages/pi-planner/README.md)
+
+### [@marcfargas/permission-gate](packages/permission-gate/) _(skeleton)_
+
+Standalone tool permission enforcement — gates tool calls based on safety classifications. Usable without the full plan workflow.
+
+→ [Documentation](packages/permission-gate/README.md)
+
+## Libraries
+
+### [@marcfargas/pi-safety](packages/pi-safety/)
+
+Safety classification registry — glob-based READ/WRITE command matching. Used by pi-planner and permission-gate, but usable standalone in any pi extension.
+
+```typescript
+import { SafetyRegistry } from "@marcfargas/pi-safety";
+
+const registry = new SafetyRegistry();
+registry.register("go-gmail", {
+  "npx go-gmail * search *": "READ",
+  "npx go-gmail * send *": "WRITE",
+}, "WRITE");
+
+registry.resolve("npx go-gmail marc@acme.com search 'invoice'");
+// → "READ"
+```
+
+→ [Full documentation](packages/pi-safety/README.md)
 
 ## Development
 
 ```bash
-# Install all workspaces
-npm install
-
-# Run all tests
-npm test
-
-# Typecheck all packages
-npm run typecheck
-
-# Run tests for a specific package
-cd packages/pi-planner && npm test
+npm install               # Install all workspaces
+npm test                  # Run all tests
+npm run typecheck         # Typecheck all packages
 ```
 
-## Changesets
-
-Each package is independently versioned using [changesets](https://github.com/changesets/changesets).
+Packages are independently versioned with [changesets](https://github.com/changesets/changesets):
 
 ```bash
-# Create a changeset
-npx changeset
-
-# Version packages
-npx changeset version
-
-# Publish
-npx changeset publish
+npx changeset             # Create a changeset
+npx changeset version     # Bump versions
+npx changeset publish     # Publish to npm
 ```
 
-## Architecture
+## License
 
-```
-@marcfargas/pi-safety          ← Core: glob matching, safety registry, types
-     ↑                ↑
-@marcfargas/pi-planner    @marcfargas/permission-gate
-(plan workflow)            (tool gating, skeleton)
-```
-
-**pi-safety** provides the safety classification primitives. **pi-planner** uses them for plan-mode enforcement. **permission-gate** will provide standalone tool permission enforcement usable without the full plan workflow.
+MIT

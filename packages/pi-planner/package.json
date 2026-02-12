@@ -7,7 +7,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/marcfargas/pi-planner.git",
+    "url": "https://github.com/marcfargas/pi-mf-extensions.git",
     "directory": "packages/pi-planner"
   },
   "keywords": [
