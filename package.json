@@ -1,6 +1,6 @@
 {
   "name": "@marcfargas/pi-planner",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Persistent, auditable plan-then-execute workflow for pi agents",
   "author": "Marc Fargas",
   "license": "MIT",
