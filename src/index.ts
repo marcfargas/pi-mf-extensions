@@ -11,7 +11,7 @@ import { registerSkillSafetyTool } from "./tools/safety.js";
 import { PlanStore } from "./persistence/plan-store.js";
 import { loadConfig } from "./persistence/config.js";
 import { registerModeHooks, type PlannerMode } from "./mode/hooks.js";
-import { executePlan } from "./executor/runner.js";
+import { executePlan, finishExecution, type ExecutionState } from "./executor/runner.js";
 import { findStalledPlans, formatStalledPlanMessage } from "./executor/stalled.js";
 import { countCompletedSteps } from "./executor/checkpoint.js";
 import { SafetyRegistry } from "./safety/registry.js";
@@ -46,8 +46,8 @@ export default function activate(pi: ExtensionAPI): void {
 	// Safety registry — populated by agent calling plan_skill_safety
 	const safetyRegistry = new SafetyRegistry();
 
-	// Track active executions to avoid duplicates
-	const activeExecutions = new Set<string>();
+	// Active execution state — one at a time
+	let executionState: ExecutionState | null = null;
 
 	function ensureStore(cwd: string): PlanStore {
 		if (!store) {
@@ -97,6 +97,8 @@ export default function activate(pi: ExtensionAPI): void {
 		// Footer status
 		if (planMode) {
 			ctx.ui.setStatus("pi-planner", "⏸ plan");
+		} else if (executionState && !executionState.done) {
+			ctx.ui.setStatus("pi-planner", "▶ executing");
 		} else {
 			ctx.ui.setStatus("pi-planner", undefined);
 		}
@@ -149,11 +151,14 @@ export default function activate(pi: ExtensionAPI): void {
 	}
 
 	/**
-	 * Start plan execution in the background.
+	 * Start plan execution in-session.
 	 * Called after approval (from tool or command).
 	 */
 	async function startExecution(planId: string, ctx: ExtensionContext): Promise<void> {
-		if (activeExecutions.has(planId)) return;
+		if (executionState && !executionState.done) {
+			ctx.ui.notify(`Cannot start ${planId}: another plan is already executing (${executionState.planId}).`, "error");
+			return;
+		}
 
 		const s = store;
 		if (!s) return;
@@ -161,26 +166,161 @@ export default function activate(pi: ExtensionAPI): void {
 		const plan = await s.get(planId);
 		if (!plan || plan.status !== "approved") return;
 
-		const availableToolNames = pi.getAllTools().map((t) => t.name);
-		activeExecutions.add(planId);
+		// Exit plan mode if active — execution needs full tools
+		if (planMode) {
+			planMode = false;
+			if (allToolNames) {
+				pi.setActiveTools(allToolNames);
+				allToolNames = undefined;
+			}
+			persistState();
+		}
 
-		// Execute in background — don't await
-		executePlan(plan, s, ctx.cwd, availableToolNames, ctx, () => updateStatus(ctx))
-			.then((result) => {
-				activeExecutions.delete(planId);
-				if (result.ok) {
-					ctx.ui.notify(`Plan ${planId} completed successfully.`, "info");
-				} else {
-					ctx.ui.notify(`Plan ${planId} failed: ${result.error}`, "error");
-				}
-				updateStatus(ctx);
-			})
-			.catch((err) => {
-				activeExecutions.delete(planId);
-				ctx.ui.notify(`Plan ${planId} execution error: ${err}`, "error");
-				updateStatus(ctx);
-			});
+		const availableToolNames = pi.getAllTools().map((t) => t.name);
+
+		const result = await executePlan(plan, s, ctx.cwd, availableToolNames, ctx, pi, () => updateStatus(ctx));
+
+		if (result.state) {
+			executionState = result.state;
+			ctx.ui.notify(`Plan ${planId} execution started. The agent will now follow the plan steps.`, "info");
+		} else {
+			ctx.ui.notify(`Plan ${planId} failed to start: ${result.error}`, "error");
+		}
+
+		await updateStatus(ctx);
 	}
+
+	// ── Register plan_run_script tool ───────────────────────
+
+	const PlanRunScriptParams = Type.Object({
+		action: Type.Union([
+			Type.Literal("step_complete"),
+			Type.Literal("step_failed"),
+			Type.Literal("plan_complete"),
+			Type.Literal("plan_failed"),
+		], { description: "Report action: step_complete, step_failed, plan_complete, or plan_failed" }),
+		step: Type.Optional(Type.Number({ description: "Step number (1-indexed) for step_complete/step_failed" })),
+		summary: Type.String({ description: "Description of what happened" }),
+	});
+
+	pi.registerTool({
+		name: "plan_run_script",
+		label: "Plan Run Script",
+		description: `Report plan execution progress. Called by the agent during plan execution to report step outcomes.
+
+- step_complete: Report successful completion of a step
+- step_failed: Report failure of a step (then call plan_failed)
+- plan_complete: Report that all steps completed successfully
+- plan_failed: Report that the plan failed (after step_failed, or for plan-level issues)
+
+Always report every step outcome. Always end with exactly one plan_complete or plan_failed.`,
+		parameters: PlanRunScriptParams,
+		async execute(
+			_toolCallId: string,
+			params: Static<typeof PlanRunScriptParams>,
+			_signal: AbortSignal | undefined,
+			_onUpdate: AgentToolUpdateCallback | undefined,
+			ctx: ExtensionContext,
+		): Promise<AgentToolResult<unknown>> {
+			if (!executionState) {
+				return {
+					content: [{ type: "text", text: "No active plan execution. This tool is only available during plan execution." }],
+					details: {},
+					isError: true,
+				} as AgentToolResult<unknown>;
+			}
+
+			const { action, step, summary } = params;
+			const state = executionState;
+
+			switch (action) {
+				case "step_complete": {
+					const stepIdx = (step ?? 1) - 1; // convert to 0-indexed
+					state.checkpoint.logStep({
+						step: stepIdx,
+						tool: state.planId,
+						operation: "step_complete",
+						status: "success",
+						result_summary: summary,
+						timestamp: new Date().toISOString(),
+					});
+
+					// Update scripts in store
+					try {
+						await state.store.update(state.planId, (p) => {
+							if (p.scripts && p.scripts[stepIdx]) {
+								p.scripts[stepIdx].status = "success";
+								p.scripts[stepIdx].summary = summary;
+							}
+						});
+					} catch { /* non-fatal */ }
+
+					if (state.onStatusUpdate) await state.onStatusUpdate();
+
+					return {
+						content: [{ type: "text", text: `Step ${step} recorded as complete. Continue with the next step.` }],
+						details: {},
+					} as AgentToolResult<unknown>;
+				}
+
+				case "step_failed": {
+					const stepIdx = (step ?? 1) - 1;
+					state.checkpoint.logStep({
+						step: stepIdx,
+						tool: state.planId,
+						operation: "step_failed",
+						status: "failed",
+						error: summary,
+						timestamp: new Date().toISOString(),
+					});
+
+					// Update scripts in store
+					try {
+						await state.store.update(state.planId, (p) => {
+							if (p.scripts && p.scripts[stepIdx]) {
+								p.scripts[stepIdx].status = "failed";
+								p.scripts[stepIdx].error = summary;
+							}
+						});
+					} catch { /* non-fatal */ }
+
+					if (state.onStatusUpdate) await state.onStatusUpdate();
+
+					return {
+						content: [{ type: "text", text: `Step ${step} recorded as failed. Now call plan_run_script with action: "plan_failed".` }],
+						details: {},
+					} as AgentToolResult<unknown>;
+				}
+
+				case "plan_complete": {
+					await finishExecution(state, { ok: true, planId: state.planId, error: summary }, pi, ctx);
+					ctx.ui.notify(`✓ Plan ${state.planId} completed: ${summary}`, "info");
+
+					return {
+						content: [{ type: "text", text: `Plan execution completed successfully. Tools have been restored. Summary: ${summary}` }],
+						details: {},
+					} as AgentToolResult<unknown>;
+				}
+
+				case "plan_failed": {
+					await finishExecution(state, { ok: false, planId: state.planId, error: summary }, pi, ctx);
+					ctx.ui.notify(`✗ Plan ${state.planId} failed: ${summary}`, "error");
+
+					return {
+						content: [{ type: "text", text: `Plan execution failed. Tools have been restored. Error: ${summary}` }],
+						details: {},
+					} as AgentToolResult<unknown>;
+				}
+
+				default:
+					return {
+						content: [{ type: "text", text: `Unknown action: ${action}` }],
+						details: {},
+						isError: true,
+					} as AgentToolResult<unknown>;
+			}
+		},
+	});
 
 	// Register plan tools (with execution callback)
 	registerPlanTools(pi, ensureStore, startExecution);
@@ -396,8 +536,20 @@ Exit plan mode when:
 		}
 	});
 
-	// Update widget after each agent turn
+	// Update widget after each agent turn + handle execution completion
 	pi.on("agent_end", async (_event, ctx) => {
+		// If an execution just finished (plan_run_script set done=true), clean up
+		if (executionState?.done) {
+			const result = executionState.result;
+			executionState = null;
+
+			// Tools already restored by finishExecution in plan_run_script handler
+			if (result?.ok) {
+				ctx.ui.notify(`Plan ${result.planId} completed successfully.`, "info");
+			}
+			// Failed notification already shown by plan_run_script handler
+		}
+
 		await updateStatus(ctx);
 	});
 }
@@ -505,7 +657,9 @@ function formatPlanDetail(plan: Plan): string {
 	for (let i = 0; i < plan.steps.length; i++) {
 		const s = plan.steps[i];
 		const target = s.target ? ` → ${s.target}` : "";
-		lines.push(`  ${i + 1}. ${s.description} (${s.tool}: ${s.operation}${target})`);
+		const scriptStatus = plan.scripts?.[i]?.status;
+		const statusMark = scriptStatus === "success" ? " ✓" : scriptStatus === "failed" ? " ✗" : "";
+		lines.push(`  ${i + 1}. ${s.description} (${s.tool}: ${s.operation}${target})${statusMark}`);
 	}
 
 	if (plan.context) {

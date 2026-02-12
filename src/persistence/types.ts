@@ -20,6 +20,14 @@ export interface PlanStep {
 	target?: string;
 }
 
+/** Tracks execution state of a single plan step. */
+export interface PlanScript {
+	stepIndex: number;
+	status: "pending" | "running" | "success" | "failed" | "skipped";
+	summary?: string;
+	error?: string;
+}
+
 export interface Plan {
 	// Identity
 	id: string;
@@ -46,6 +54,9 @@ export interface Plan {
 	steps: PlanStep[];
 	context?: string;
 	body?: string;
+
+	// Execution tracking (populated during execution)
+	scripts?: PlanScript[];
 }
 
 export interface PlanListOptions {

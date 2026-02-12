@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildExecutorPrompt, renderPlanForExecutor } from "../../src/executor/spawn.js";
+import { buildExecutorPrompt, renderPlanForExecutor } from "../../src/executor/runner.js";
 import type { Plan } from "../../src/persistence/types.js";
 
 function makePlan(overrides?: Partial<Plan>): Plan {
@@ -57,6 +57,20 @@ describe("buildExecutorPrompt", () => {
 		expect(prompt).toContain("STOP immediately");
 		expect(prompt).toContain("Do NOT improvise");
 		expect(prompt).toContain("Do NOT use bash");
+	});
+
+	it("includes plan_run_script execution protocol", () => {
+		const prompt = buildExecutorPrompt(makePlan());
+		expect(prompt).toContain("plan_run_script");
+		expect(prompt).toContain("step_complete");
+		expect(prompt).toContain("step_failed");
+		expect(prompt).toContain("plan_complete");
+		expect(prompt).toContain("plan_failed");
+	});
+
+	it("includes plan ID", () => {
+		const prompt = buildExecutorPrompt(makePlan());
+		expect(prompt).toContain("PLAN-deadbeef");
 	});
 });
 
