@@ -575,14 +575,20 @@ async function viewPlanDetail(
 			actions.push("Execute", "Cancel", "Delete", "Back");
 			break;
 		case "stalled":
-			actions.push("Mark as Failed", "Cancel", "Delete", "Back");
+			actions.push("Retry", "Mark as Failed", "Clone", "Cancel", "Delete", "Back");
 			break;
 		case "executing":
 			actions.push("Back");
 			break;
+		case "failed":
+			actions.push("Retry", "Clone", "Delete", "Back");
+			break;
+		case "rejected":
+			actions.push("Clone", "Delete", "Back");
+			break;
 		default:
-			// Terminal statuses: completed, failed, rejected, cancelled
-			actions.push("Delete", "Back");
+			// Terminal statuses: completed, cancelled
+			actions.push("Clone", "Delete", "Back");
 			break;
 	}
 
@@ -609,6 +615,29 @@ async function viewPlanDetail(
 			await store.cancel(plan.id);
 			ctx.ui.notify(`Plan ${plan.id} cancelled.`, "info");
 		}
+	} else if (action === "Retry") {
+		// Reset to approved and re-execute
+		await store.update(plan.id, (p) => {
+			p.status = "approved";
+			p.result_summary = undefined;
+			p.execution_started_at = undefined;
+			p.execution_ended_at = undefined;
+			p.execution_session = undefined;
+			p.scripts = undefined;
+		});
+		ctx.ui.notify(`Plan ${plan.id} reset to approved. Starting execution...`, "info");
+		await startExecution(plan.id, ctx);
+	} else if (action === "Clone") {
+		// Create a new plan with the same content
+		const cloned = await store.create({
+			title: plan.title,
+			steps: plan.steps,
+			context: plan.context,
+			tools_required: plan.tools_required,
+			planner_model: plan.planner_model,
+			executor_model: plan.executor_model,
+		});
+		ctx.ui.notify(`Cloned as ${cloned.id} (proposed). Original: ${plan.id}`, "info");
 	} else if (action === "Mark as Failed") {
 		await store.markFailed(plan.id, "Marked as failed after stalling");
 		ctx.ui.notify(`Plan ${plan.id} marked as failed.`, "info");
