@@ -10,7 +10,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { PlanStore } from "../persistence/plan-store.js";
-import type { SafetyRegistry } from "../safety/registry.js";
+import type { SafetyRegistry } from "@marcfargas/pi-safety";
 
 export type PlannerMode = "plan" | "normal";
 

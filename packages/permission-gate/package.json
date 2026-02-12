@@ -1,0 +1,32 @@
+{
+  "name": "@marcfargas/permission-gate",
+  "version": "0.1.0",
+  "description": "Tool permission enforcement for pi agents — gates tool calls based on safety classifications",
+  "author": "Marc Fargas",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcfargas/pi-planner.git",
+    "directory": "packages/permission-gate"
+  },
+  "files": [
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "dependencies": {
+    "@marcfargas/pi-safety": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.50.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

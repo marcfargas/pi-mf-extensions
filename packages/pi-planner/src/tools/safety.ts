@@ -8,7 +8,7 @@
 
 import type { ExtensionAPI, AgentToolResult, AgentToolUpdateCallback, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
-import type { SafetyRegistry } from "../safety/registry.js";
+import type { SafetyRegistry } from "@marcfargas/pi-safety";
 
 // ── Schema ──────────────────────────────────────────────────
 

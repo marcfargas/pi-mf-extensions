@@ -14,7 +14,7 @@ import { registerModeHooks, type PlannerMode } from "./mode/hooks.js";
 import { executePlan, finishExecution, type ExecutionState } from "./executor/runner.js";
 import { findStalledPlans, formatStalledPlanMessage } from "./executor/stalled.js";
 import { countCompletedSteps } from "./executor/checkpoint.js";
-import { SafetyRegistry } from "./safety/registry.js";
+import { SafetyRegistry } from "@marcfargas/pi-safety";
 import { DEFAULT_CONFIG, type Plan, type PlannerConfig } from "./persistence/types.js";
 
 // Read-only tools allowed in plan mode (plus plan CRUD tools added dynamically)

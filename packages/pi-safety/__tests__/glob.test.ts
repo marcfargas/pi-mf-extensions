@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { globMatch } from "../../src/safety/glob.js";
+import { globMatch } from "../src/glob.js";
 
 describe("globMatch", () => {
 	describe("exact matches", () => {

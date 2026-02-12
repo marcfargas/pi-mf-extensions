@@ -1,0 +1,21 @@
+{
+  "name": "@marcfargas/pi-safety",
+  "version": "0.1.0",
+  "description": "Safety classification registry for pi agent tool calls — glob-based READ/WRITE command matching",
+  "author": "Marc Fargas",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  }
+}

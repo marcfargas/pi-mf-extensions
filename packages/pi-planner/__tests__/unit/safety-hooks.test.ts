@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { isSafeBashCommand } from "../../src/mode/hooks.js";
-import { SafetyRegistry } from "../../src/safety/registry.js";
+import { SafetyRegistry } from "@marcfargas/pi-safety";
 
 /**
  * Tests for how the safety registry integrates with plan mode bash filtering.

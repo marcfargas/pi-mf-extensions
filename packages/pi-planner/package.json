@@ -1,0 +1,44 @@
+{
+  "name": "@marcfargas/pi-planner",
+  "version": "0.2.0",
+  "description": "Persistent, auditable plan-then-execute workflow for pi agents",
+  "author": "Marc Fargas",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcfargas/pi-planner.git",
+    "directory": "packages/pi-planner"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "planner",
+    "plan",
+    "safety",
+    "workflow",
+    "audit"
+  ],
+  "files": [
+    "src/**/*.ts",
+    "SKILL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "dependencies": {
+    "@marcfargas/pi-safety": "^0.1.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.50.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  }
+}
