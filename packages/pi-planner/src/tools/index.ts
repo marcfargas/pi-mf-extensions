@@ -25,6 +25,7 @@ const ProposeParams = Type.Object({
 	title: Type.String({ description: "Short description of what this plan does" }),
 	steps: Type.Array(StepSchema, { description: "Ordered list of actions to execute" }),
 	context: Type.Optional(Type.String({ description: "Structured context gathered during planning (tool outputs, notes)" })),
+	executor_model: Type.Optional(Type.String({ description: "Model to use for plan execution (provider/model-id, e.g. 'anthropic/claude-sonnet-4'). Defaults to current model." })),
 });
 
 const ListParams = Type.Object({
@@ -80,10 +81,12 @@ The plan will be presented to the user for approval before execution.`,
 				steps: params.steps,
 				context: params.context,
 				tools_required: toolsRequired,
+				executor_model: params.executor_model,
 			});
 
+			const modelLine = plan.executor_model ? `\nExecutor model: ${plan.executor_model}` : "";
 			return textResult(
-				`Plan created: ${plan.id}\nTitle: ${plan.title}\nStatus: proposed\nSteps: ${plan.steps.length}\nTools: ${toolsRequired.join(", ")}\n\nAwaiting approval. User can approve via /plan or /plans command.`,
+				`Plan created: ${plan.id}\nTitle: ${plan.title}\nStatus: proposed\nSteps: ${plan.steps.length}\nTools: ${toolsRequired.join(", ")}${modelLine}\n\nAwaiting approval. User can approve via /plan or /plans command.`,
 			);
 		},
 	});

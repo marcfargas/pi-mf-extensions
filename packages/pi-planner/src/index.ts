@@ -176,14 +176,45 @@ export default function activate(pi: ExtensionAPI): void {
 			persistState();
 		}
 
+		// Resolve executor model if specified
+		let savedModel: unknown | undefined;
+		if (plan.executor_model) {
+			const parts = plan.executor_model.split("/");
+			if (parts.length === 2) {
+				const [provider, modelId] = parts;
+				const targetModel = ctx.modelRegistry.find(provider, modelId);
+				if (targetModel) {
+					savedModel = ctx.model; // snapshot current model
+					const switched = await pi.setModel(targetModel);
+					if (switched) {
+						ctx.ui.notify(`Switched to ${plan.executor_model} for execution.`, "info");
+					} else {
+						ctx.ui.notify(`No API key for ${plan.executor_model}. Using current model.`, "warning");
+						savedModel = undefined; // don't restore if we didn't switch
+					}
+				} else {
+					ctx.ui.notify(`Model ${plan.executor_model} not found. Using current model.`, "warning");
+				}
+			} else {
+				ctx.ui.notify(`Invalid executor_model format "${plan.executor_model}" (expected "provider/model-id"). Using current model.`, "warning");
+			}
+		}
+
 		const availableToolNames = pi.getAllTools().map((t) => t.name);
 
 		const result = await executePlan(plan, s, ctx.cwd, availableToolNames, ctx, pi, () => updateStatus(ctx));
 
 		if (result.state) {
+			result.state.savedModel = savedModel;
 			executionState = result.state;
 			ctx.ui.notify(`Plan ${planId} execution started. The agent will now follow the plan steps.`, "info");
 		} else {
+			// Restore model if execution failed to start
+			if (savedModel) {
+				try {
+					await pi.setModel(savedModel as never);
+				} catch { /* best-effort */ }
+			}
 			ctx.ui.notify(`Plan ${planId} failed to start: ${result.error}`, "error");
 		}
 

@@ -33,6 +33,8 @@ export interface ExecutionResult {
 export interface ExecutionState {
 	planId: string;
 	savedTools: string[];
+	/** Model that was active before execution (restored on finish). */
+	savedModel?: unknown;
 	checkpoint: CheckpointLogger;
 	store: PlanStore;
 	totalSteps: number;
@@ -51,11 +53,13 @@ export function buildExecutorPrompt(plan: Plan): string {
 		.map((s, i) => `${i + 1}. ${s.description} (${s.tool}: ${s.operation}${s.target ? ` → ${s.target}` : ""})`)
 		.join("\n");
 
+	const modelNote = plan.executor_model ? `\n## Executor Model\n${plan.executor_model}\n` : "";
+
 	return `You are now executing an approved plan. Follow the steps exactly.
 
 ## Plan: ${plan.title}
 ## ID: ${plan.id}
-
+${modelNote}
 ## Available Tools
 ${toolList}
 
@@ -191,6 +195,15 @@ export async function finishExecution(
 
 	// Restore previous tools
 	pi.setActiveTools(state.savedTools);
+
+	// Restore previous model (if switched for execution)
+	if (state.savedModel) {
+		try {
+			await pi.setModel(state.savedModel as never);
+		} catch {
+			// Model restore is best-effort
+		}
+	}
 
 	// Update plan status
 	try {

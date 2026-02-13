@@ -72,6 +72,17 @@ describe("buildExecutorPrompt", () => {
 		const prompt = buildExecutorPrompt(makePlan());
 		expect(prompt).toContain("PLAN-deadbeef");
 	});
+
+	it("includes executor model when present", () => {
+		const prompt = buildExecutorPrompt(makePlan({ executor_model: "anthropic/claude-sonnet-4" }));
+		expect(prompt).toContain("## Executor Model");
+		expect(prompt).toContain("anthropic/claude-sonnet-4");
+	});
+
+	it("omits executor model section when not present", () => {
+		const prompt = buildExecutorPrompt(makePlan());
+		expect(prompt).not.toContain("## Executor Model");
+	});
 });
 
 describe("renderPlanForExecutor", () => {
