@@ -153,18 +153,22 @@ export default function activate(pi: ExtensionAPI): void {
 	/**
 	 * Start plan execution in-session.
 	 * Called after approval (from tool or command).
+	 *
+	 * Returns the executor prompt text to include in the tool result,
+	 * so the agent can start executing in the same turn (avoiding the
+	 * pi agent loop tool-snapshot issue with follow-up messages).
 	 */
-	async function startExecution(planId: string, ctx: ExtensionContext): Promise<void> {
+	async function startExecution(planId: string, ctx: ExtensionContext): Promise<string | undefined> {
 		if (executionState && !executionState.done) {
 			ctx.ui.notify(`Cannot start ${planId}: another plan is already executing (${executionState.planId}).`, "error");
-			return;
+			return undefined;
 		}
 
 		const s = store;
-		if (!s) return;
+		if (!s) return undefined;
 
 		const plan = await s.get(planId);
-		if (!plan || plan.status !== "approved") return;
+		if (!plan || plan.status !== "approved") return undefined;
 
 		// Exit plan mode if active — execution needs full tools
 		if (planMode) {
@@ -208,6 +212,8 @@ export default function activate(pi: ExtensionAPI): void {
 			result.state.savedModel = savedModel;
 			executionState = result.state;
 			ctx.ui.notify(`Plan ${planId} execution started. The agent will now follow the plan steps.`, "info");
+			await updateStatus(ctx);
+			return result.prompt;
 		} else {
 			// Restore model if execution failed to start
 			if (savedModel) {
@@ -216,9 +222,9 @@ export default function activate(pi: ExtensionAPI): void {
 				} catch { /* best-effort */ }
 			}
 			ctx.ui.notify(`Plan ${planId} failed to start: ${result.error}`, "error");
+			await updateStatus(ctx);
+			return undefined;
 		}
-
-		await updateStatus(ctx);
 	}
 
 	// ── Register plan_run_script tool ───────────────────────
@@ -441,7 +447,7 @@ Exit plan mode when:
 			const plan = await s.get(planId);
 			if (!plan) return;
 
-			await reviewPlan(plan, s, ctx, startExecution);
+			await reviewPlan(plan, s, ctx, startExecution, pi);
 			await updateStatus(ctx);
 		},
 	});
@@ -491,7 +497,7 @@ Exit plan mode when:
 			const plan = await s.get(planId);
 			if (!plan) return;
 
-			await viewPlanDetail(plan, s, ctx, startExecution);
+			await viewPlanDetail(plan, s, ctx, startExecution, pi);
 			await updateStatus(ctx);
 		},
 	});
@@ -587,13 +593,33 @@ Exit plan mode when:
 
 // ── Plan Review & Detail Views ──────────────────────────────
 
-type ExecutionStarter = (planId: string, ctx: ExtensionContext) => Promise<void>;
+type ExecutionStarter = (planId: string, ctx: ExtensionContext) => Promise<string | undefined>;
+
+/**
+ * Execute a plan from a slash command context.
+ * Unlike tool-based execution, commands can use sendUserMessage
+ * since the agent isn't streaming (fresh tool snapshot on next turn).
+ */
+async function executeFromCommand(
+	planId: string,
+	ctx: ExtensionContext,
+	pi: ExtensionAPI,
+	startExecution: ExecutionStarter,
+): Promise<void> {
+	const prompt = await startExecution(planId, ctx);
+	if (prompt) {
+		// Send executor prompt — agent will process it in a new turn
+		// with a fresh tool snapshot that includes plan_run_script
+		pi.sendUserMessage(prompt);
+	}
+}
 
 async function viewPlanDetail(
 	plan: Plan,
 	store: PlanStore,
 	ctx: ExtensionContext,
 	startExecution: ExecutionStarter,
+	pi: ExtensionAPI,
 ): Promise<void> {
 	const detail = formatPlanDetail(plan);
 
@@ -609,7 +635,7 @@ async function viewPlanDetail(
 			actions.push("Retry", "Mark as Failed", "Clone", "Cancel", "Delete", "Back");
 			break;
 		case "executing":
-			actions.push("Back");
+			actions.push("Mark as Completed", "Mark as Failed", "Back");
 			break;
 		case "failed":
 			actions.push("Retry", "Clone", "Delete", "Back");
@@ -631,10 +657,10 @@ async function viewPlanDetail(
 	} else if (action === "Approve & Execute") {
 		await store.approve(plan.id);
 		ctx.ui.notify(`Plan ${plan.id} approved. Starting execution...`, "info");
-		await startExecution(plan.id, ctx);
+		await executeFromCommand(plan.id, ctx, pi, startExecution);
 	} else if (action === "Execute") {
 		ctx.ui.notify(`Starting execution of ${plan.id}...`, "info");
-		await startExecution(plan.id, ctx);
+		await executeFromCommand(plan.id, ctx, pi, startExecution);
 	} else if (action === "Reject") {
 		const feedback = await ctx.ui.editor("Rejection feedback:", "");
 		const reason = feedback?.trim() || "Rejected via /plans command";
@@ -657,7 +683,7 @@ async function viewPlanDetail(
 			p.scripts = undefined;
 		});
 		ctx.ui.notify(`Plan ${plan.id} reset to approved. Starting execution...`, "info");
-		await startExecution(plan.id, ctx);
+		await executeFromCommand(plan.id, ctx, pi, startExecution);
 	} else if (action === "Clone") {
 		// Create a new plan with the same content
 		const cloned = await store.create({
@@ -669,8 +695,15 @@ async function viewPlanDetail(
 			executor_model: plan.executor_model,
 		});
 		ctx.ui.notify(`Cloned as ${cloned.id} (proposed). Original: ${plan.id}`, "info");
+	} else if (action === "Mark as Completed") {
+		const summary = await ctx.ui.editor("Completion summary:", "Manually completed via /plans");
+		await store.markCompleted(plan.id, summary?.trim() || "Manually completed");
+		ctx.ui.notify(`Plan ${plan.id} marked as completed.`, "info");
 	} else if (action === "Mark as Failed") {
-		await store.markFailed(plan.id, "Marked as failed after stalling");
+		const reason = plan.status === "stalled"
+			? "Marked as failed after stalling"
+			: await ctx.ui.editor("Failure reason:", "Manually marked as failed") ?? "Manually marked as failed";
+		await store.markFailed(plan.id, reason.trim());
 		ctx.ui.notify(`Plan ${plan.id} marked as failed.`, "info");
 	} else if (action === "Delete") {
 		const confirmed = await ctx.ui.confirm("Delete plan?", `Permanently delete ${plan.id}: ${plan.title}`);
@@ -686,6 +719,7 @@ async function reviewPlan(
 	store: PlanStore,
 	ctx: ExtensionContext,
 	startExecution: ExecutionStarter,
+	pi: ExtensionAPI,
 ): Promise<void> {
 	const detail = formatPlanDetail(plan);
 	const action = await ctx.ui.select(detail, ["Approve", "Approve & Execute", "Reject", "Cancel"]);
@@ -696,7 +730,7 @@ async function reviewPlan(
 	} else if (action === "Approve & Execute") {
 		await store.approve(plan.id);
 		ctx.ui.notify(`Plan ${plan.id} approved. Starting execution...`, "info");
-		await startExecution(plan.id, ctx);
+		await executeFromCommand(plan.id, ctx, pi, startExecution);
 	} else if (action === "Reject") {
 		const feedback = await ctx.ui.editor("Rejection feedback:", "");
 		const reason = feedback?.trim() || "Rejected via /plan command";

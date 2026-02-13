@@ -10,7 +10,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { PlanStore } from "../persistence/plan-store.js";
 import type { PlanStatus } from "../persistence/types.js";
 
-type ExecutionStarter = (planId: string, ctx: ExtensionContext) => Promise<void>;
+type ExecutionStarter = (planId: string, ctx: ExtensionContext) => Promise<string | undefined>;
 
 // ── Schemas ─────────────────────────────────────────────────
 
@@ -177,13 +177,17 @@ The plan will be presented to the user for approval before execution.`,
 			try {
 				const plan = await store.approve(params.id);
 
-				// Trigger execution if callback available
+				// Start execution — returns the executor prompt to include in tool result
 				if (onApprove) {
-					// Don't await — execution runs in background
-					onApprove(plan.id, ctx).catch(() => {});
+					const executorPrompt = await onApprove(plan.id, ctx);
+					if (executorPrompt) {
+						return textResult(
+							`Plan ${plan.id} approved and execution started.\n\n${executorPrompt}`,
+						);
+					}
 				}
 
-				return textResult(`Plan ${plan.id} approved. Status: ${plan.status}. Execution starting...`);
+				return textResult(`Plan ${plan.id} approved. Status: ${plan.status}. Awaiting execution.`);
 			} catch (err: unknown) {
 				const msg = err instanceof Error ? err.message : String(err);
 				return textResult(`Failed to approve: ${msg}`, true);

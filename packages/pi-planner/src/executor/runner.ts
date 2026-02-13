@@ -1,17 +1,16 @@
 /**
  * Executor runner — orchestrates plan execution in-session.
  *
- * Instead of spawning a subagent, this uses pi.sendUserMessage() to instruct
- * the current agent to execute the plan, with pi.setActiveTools() to scope
- * the available tools and a temporary plan_run_script tool for step reporting.
+ * The executor works by returning instructions from plan_approve's tool result,
+ * so the agent sees the executor prompt and starts executing in the same turn.
+ * The plan_run_script tool is always registered, so it's available for reporting.
  *
  * Flow:
  * 1. Pre-flight validation
  * 2. Mark plan as executing, initialize scripts
- * 3. Save current tools, restrict to plan tools + plan_run_script
- * 4. Send executor prompt via pi.sendUserMessage()
- * 5. Agent executes steps, reports via plan_run_script
- * 6. On completion/failure, restore tools (via agent_end hook in index.ts)
+ * 3. Return executor prompt (agent acts on it in current turn)
+ * 4. Agent executes steps, reports via plan_run_script
+ * 5. On completion/failure, restore state (via agent_end hook in index.ts)
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -105,21 +104,22 @@ Follow the steps in order. Report each step's outcome via plan_run_script.`;
 /**
  * Start plan execution in-session.
  *
- * Sets up execution state, restricts tools, and sends the executor prompt.
- * The actual execution happens asynchronously as the agent processes the message.
- * Completion is detected via plan_run_script tool calls.
+ * Sets up execution state and returns the executor prompt.
+ * The prompt is included in plan_approve's tool result so the agent
+ * sees it and starts executing in the same turn — avoiding the tool
+ * snapshot issue where follow-up messages can't see newly added tools.
  *
- * Returns immediately with either an error or the execution state.
+ * Returns either an error or the execution state + prompt text.
  */
 export async function executePlan(
 	plan: Plan,
 	store: PlanStore,
 	projectRoot: string,
 	availableTools: string[],
-	ctx: ExtensionContext,
-	pi: ExtensionAPI,
+	_ctx: ExtensionContext,
+	_pi: ExtensionAPI,
 	onStatusUpdate?: () => Promise<void>,
-): Promise<{ ok: boolean; error?: string; state?: ExecutionState }> {
+): Promise<{ ok: boolean; error?: string; state?: ExecutionState; prompt?: string }> {
 	// Pre-flight validation
 	const preflight = validatePreflight(plan, plan.version, availableTools);
 	if (!preflight.ok) {
@@ -152,24 +152,12 @@ export async function executePlan(
 	// Notify widget
 	if (onStatusUpdate) await onStatusUpdate();
 
-	// Save current tools and set execution tools
-	const savedTools = pi.getActiveTools();
-	const allToolNames = pi.getAllTools().map((t) => t.name);
-
-	// During execution: all available tools + plan_run_script
-	// We use ALL tools (not just plan.tools_required) because tool names
-	// in the plan are semantic (e.g., "odoo-toolbox") while actual pi tools
-	// may differ (e.g., "bash" for CLI tools, "odoo" for registered tools).
-	const executionTools = [...new Set([...allToolNames, "plan_run_script"])];
-	pi.setActiveTools(executionTools);
-
-	// Build executor prompt and send as user message
+	// Build executor prompt — returned to caller for inclusion in tool result
 	const prompt = buildExecutorPrompt(plan);
-	pi.sendUserMessage(prompt, { deliverAs: "followUp" });
 
 	const state: ExecutionState = {
 		planId: plan.id,
-		savedTools,
+		savedTools: [], // No tool switching needed — agent uses current tools
 		checkpoint,
 		store,
 		totalSteps: plan.steps.length,
@@ -177,7 +165,7 @@ export async function executePlan(
 		onStatusUpdate,
 	};
 
-	return { ok: true, state };
+	return { ok: true, state, prompt };
 }
 
 /**
@@ -192,9 +180,6 @@ export async function finishExecution(
 ): Promise<void> {
 	state.done = true;
 	state.result = result;
-
-	// Restore previous tools
-	pi.setActiveTools(state.savedTools);
 
 	// Restore previous model (if switched for execution)
 	if (state.savedModel) {

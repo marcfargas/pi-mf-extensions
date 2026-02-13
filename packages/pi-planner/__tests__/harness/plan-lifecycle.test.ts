@@ -86,7 +86,7 @@ describe("pi-planner: plan lifecycle via harness", () => {
 		const approveResult = t.events.toolResultsFor("plan_approve");
 		expect(approveResult).toHaveLength(1);
 		expect(approveResult[0].text).toContain("approved");
-		expect(approveResult[0].text).toContain("Execution starting");
+		expect(approveResult[0].text).toContain("execution started");
 		expect(approveResult[0].isError).toBe(false);
 	});
 
@@ -214,6 +214,52 @@ describe("pi-planner: plan lifecycle via harness", () => {
 		const result = t.events.toolResultsFor("plan_approve");
 		expect(result).toHaveLength(1);
 		expect(result[0].isError).toBe(true);
+	});
+});
+
+describe("pi-planner: plan_approve executor prompt", () => {
+	let t: TestSession;
+
+	afterEach(() => {
+		t?.dispose();
+	});
+
+	it("approve includes executor prompt with plan_run_script protocol", async () => {
+		t = await createTestSession({
+			extensions: [EXTENSION_PATH],
+			mockTools: MOCKS,
+		});
+
+		let planId = "";
+
+		await t.run(
+			when("Propose and approve", [
+				calls("plan_propose", {
+					title: "Build and deploy",
+					steps: [
+						{ description: "Build project", tool: "bash", operation: "build" },
+						{ description: "Run tests", tool: "bash", operation: "test" },
+					],
+				}).then((r) => {
+					planId = r.text.match(/PLAN-[a-f0-9]+/)![0];
+				}),
+				calls("plan_approve", () => ({ id: planId })),
+				says("I'll follow the plan."),
+			]),
+		);
+
+		const approveResult = t.events.toolResultsFor("plan_approve");
+		expect(approveResult).toHaveLength(1);
+		const resultText = approveResult[0].text;
+
+		// The approve result should include the executor prompt inline
+		expect(resultText).toContain("approved and execution started");
+		expect(resultText).toContain("plan_run_script");
+		expect(resultText).toContain("step_complete");
+		expect(resultText).toContain("plan_complete");
+		expect(resultText).toContain("Build and deploy");
+		expect(resultText).toContain("Build project");
+		expect(resultText).toContain("Run tests");
 	});
 });
 
