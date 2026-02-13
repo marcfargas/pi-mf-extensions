@@ -1,5 +1,23 @@
 # @marcfargas/pi-planner
 
+## 0.3.0
+
+### Minor Changes
+
+- ### executor_model support
+
+  Plans can now specify `executor_model` (provider/model-id) via `plan_propose`. The planner switches to the requested model before execution and restores the original model on completion. Graceful fallback when model is unavailable.
+
+  ### Fix: plan_run_script not found during execution
+
+  Root cause: pi's agent loop captures a tool snapshot at loop start. Follow-up messages (used to deliver the executor prompt) reuse the old snapshot, which didn't include `plan_run_script`.
+
+  Fix: executor prompt is now returned inline in `plan_approve`'s tool result, so the agent processes it in the same turn where all tools are already available.
+
+  ### Manual plan completion
+
+  `/plans` now offers "Mark as Completed" and "Mark as Failed" for executing plans, providing a workaround for stuck executions.
+
 ## 0.2.1
 
 ### Patch Changes
