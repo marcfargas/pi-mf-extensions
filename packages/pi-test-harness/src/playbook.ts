@@ -33,11 +33,11 @@ class CallAction {
 }
 
 /**
- * Model calls a tool.
+ * The model calls a tool.
  * @param toolName Tool to call
  * @param params Static params or function for late binding
  */
-export function call(
+export function calls(
 	toolName: string,
 	params: Record<string, unknown> | (() => Record<string, unknown>) = {},
 ): CallAction {
@@ -45,11 +45,21 @@ export function call(
 }
 
 /**
- * Model emits text. Agent loop ends for this turn.
+ * The model emits text. Agent loop ends for this turn.
  */
-export function say(text: string): PlaybookAction {
+export function says(text: string): PlaybookAction {
 	return { type: "say", text };
 }
+
+/**
+ * @deprecated Use `calls()` instead. Will be removed in v0.4.
+ */
+export const call = calls;
+
+/**
+ * @deprecated Use `says()` instead. Will be removed in v0.4.
+ */
+export const say = says;
 
 /**
  * Define one user→model turn.

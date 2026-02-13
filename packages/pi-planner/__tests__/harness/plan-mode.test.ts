@@ -10,7 +10,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import * as path from "node:path";
-import { createTestSession, when, call, say, type TestSession } from "@marcfargas/pi-test-harness";
+import { createTestSession, when, calls, says, type TestSession } from "@marcfargas/pi-test-harness";
 
 const EXTENSION_PATH = path.resolve(__dirname, "../../src/index.ts");
 
@@ -40,8 +40,8 @@ describe("pi-planner: plan mode via harness", () => {
 
 		await t.run(
 			when("Enter plan mode", [
-				call("plan_mode", { enable: true }),
-				say("Plan mode is now active."),
+				calls("plan_mode", { enable: true }),
+				says("Plan mode is now active."),
 			]),
 		);
 
@@ -64,9 +64,9 @@ describe("pi-planner: plan mode via harness", () => {
 
 		await t.run(
 			when("Enter then exit plan mode", [
-				call("plan_mode", { enable: true }),
-				call("plan_mode", { enable: false }),
-				say("Back to normal."),
+				calls("plan_mode", { enable: true }),
+				calls("plan_mode", { enable: false }),
+				says("Back to normal."),
 			]),
 		);
 
@@ -84,8 +84,8 @@ describe("pi-planner: plan mode via harness", () => {
 
 		await t.run(
 			when("Try enabling plan mode when already off", [
-				call("plan_mode", { enable: false }),
-				say("No change needed."),
+				calls("plan_mode", { enable: false }),
+				says("No change needed."),
 			]),
 		);
 
@@ -112,8 +112,8 @@ describe("pi-planner: plan_propose and plan_list", () => {
 
 		await t.run(
 			when("Create a plan", [
-				call("plan_mode", { enable: true }),
-				call("plan_propose", {
+				calls("plan_mode", { enable: true }),
+				calls("plan_propose", {
 					title: "Deploy new version",
 					steps: [
 						{
@@ -131,7 +131,7 @@ describe("pi-planner: plan_propose and plan_list", () => {
 					const match = result.text.match(/PLAN-[a-f0-9]+/);
 					if (match) planId = match[0];
 				}),
-				say("Plan proposed."),
+				says("Plan proposed."),
 			]),
 		);
 
@@ -152,8 +152,8 @@ describe("pi-planner: plan_propose and plan_list", () => {
 
 		await t.run(
 			when("Create and manage a plan", [
-				call("plan_mode", { enable: true }),
-				call("plan_propose", {
+				calls("plan_mode", { enable: true }),
+				calls("plan_propose", {
 					title: "Send email",
 					steps: [
 						{
@@ -166,8 +166,8 @@ describe("pi-planner: plan_propose and plan_list", () => {
 					const match = result.text.match(/PLAN-[a-f0-9]+/);
 					if (match) planId = match[0];
 				}),
-				call("plan_list", {}),
-				say("Plans listed."),
+				calls("plan_list", {}),
+				says("Plans listed."),
 			]),
 		);
 

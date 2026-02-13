@@ -68,7 +68,7 @@ npm install --save-dev @marcfargas/pi-test-harness
 ```
 
 ```typescript
-import { createTestSession, when, call, say } from "@marcfargas/pi-test-harness";
+import { createTestSession, when, calls, says } from "@marcfargas/pi-test-harness";
 
 const t = await createTestSession({
   extensions: ["./src/index.ts"],
@@ -77,8 +77,8 @@ const t = await createTestSession({
 
 await t.run(
   when("Enter plan mode", [
-    call("plan_mode", { enable: true }),
-    say("Plan mode active."),
+    calls("plan_mode", { enable: true }),
+    says("Plan mode active."),
   ]),
 );
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createTestSession, when, call, say } from "../src/index.js";
+import { createTestSession, when, calls, says } from "../src/index.js";
 
 describe("TestSession integration", () => {
 	it("runs a simple say-only playbook", async () => {
@@ -14,7 +14,7 @@ describe("TestSession integration", () => {
 
 		await t.run(
 			when("Hello", [
-				say("Hi there!"),
+				says("Hi there!"),
 			]),
 		);
 
@@ -36,8 +36,8 @@ describe("TestSession integration", () => {
 
 		await t.run(
 			when("List files", [
-				call("bash", { command: "ls" }),
-				say("Here are the files."),
+				calls("bash", { command: "ls" }),
+				says("Here are the files."),
 			]),
 		);
 
@@ -61,11 +61,11 @@ describe("TestSession integration", () => {
 
 		await t.run(
 			when("First message", [
-				call("bash", { command: "echo hello" }),
-				say("Done with first."),
+				calls("bash", { command: "echo hello" }),
+				says("Done with first."),
 			]),
 			when("Second message", [
-				say("Done with second."),
+				says("Done with second."),
 			]),
 		);
 
@@ -94,7 +94,7 @@ describe("TestSession integration", () => {
 
 		await t.run(
 			when("Test UI", [
-				say("Done."),
+				says("Done."),
 			]),
 		);
 
@@ -139,8 +139,8 @@ describe("TestSession integration", () => {
 
 		await t.run(
 			when("Call my tool", [
-				call("my_tool", { value: "hello" }),
-				say("Tool called."),
+				calls("my_tool", { value: "hello" }),
+				says("Tool called."),
 			]),
 		);
 
@@ -193,11 +193,11 @@ describe("TestSession integration", () => {
 
 		await t.run(
 			when("Create and use", [
-				call("create_thing", {}).then((result) => {
+				calls("create_thing", {}).then((result) => {
 					thingId = result.text.match(/THING-\w+/)![0];
 				}),
-				call("use_thing", () => ({ id: thingId })),
-				say("All done."),
+				calls("use_thing", () => ({ id: thingId })),
+				says("All done."),
 			]),
 		);
 
@@ -243,8 +243,8 @@ describe("TestSession integration", () => {
 
 		await t.run(
 			when("Ask for confirmation", [
-				call("ask_confirm", {}),
-				say("Done."),
+				calls("ask_confirm", {}),
+				says("Done."),
 			]),
 		);
 
@@ -272,7 +272,7 @@ describe("TestSession integration", () => {
 
 		// For now, just verify a complete playbook doesn't throw
 		await expect(
-			t.run(when("Test", [say("Done.")]))
+			t.run(when("Test", [says("Done.")]))
 		).resolves.toBeUndefined();
 
 		t.dispose();

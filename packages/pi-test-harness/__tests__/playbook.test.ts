@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createPlaybookStreamFn, when, call, say } from "../src/playbook.js";
+import { createPlaybookStreamFn, when, calls, says, call, say } from "../src/playbook.js";
 import type { Model, Context } from "@mariozechner/pi-ai";
 
 function mockModel(): Model<any> {
@@ -25,25 +25,25 @@ function mockContext(): Context {
 	};
 }
 
-describe("when/call/say DSL", () => {
+describe("when/calls/says DSL", () => {
 	it("when() creates a Turn with prompt and actions", () => {
-		const turn = when("hello", [say("hi")]);
+		const turn = when("hello", [says("hi")]);
 		expect(turn.prompt).toBe("hello");
 		expect(turn.actions).toHaveLength(1);
 		expect(turn.actions[0].type).toBe("say");
 		expect(turn.actions[0].text).toBe("hi");
 	});
 
-	it("call() creates a call action with static params", () => {
-		const c = call("bash", { command: "ls" });
+	it("calls() creates a call action with static params", () => {
+		const c = calls("bash", { command: "ls" });
 		expect(c.action.type).toBe("call");
 		expect(c.action.toolName).toBe("bash");
 		expect(c.action.params).toEqual({ command: "ls" });
 	});
 
-	it("call() supports late-bound params", () => {
+	it("calls() supports late-bound params", () => {
 		let value = "initial";
-		const c = call("tool", () => ({ id: value }));
+		const c = calls("tool", () => ({ id: value }));
 		// Params are a function, not resolved yet
 		expect(typeof c.action.params).toBe("function");
 		value = "changed";
@@ -51,19 +51,19 @@ describe("when/call/say DSL", () => {
 		expect(resolved).toEqual({ id: "changed" });
 	});
 
-	it("call().then() chains a callback", () => {
+	it("calls().then() chains a callback", () => {
 		const captured: unknown[] = [];
-		const c = call("tool", {}).then((result) => {
+		const c = calls("tool", {}).then((result) => {
 			captured.push(result);
 		});
 		expect(c.action.thenCallback).toBeDefined();
 	});
 
-	it("when() with mixed call/say actions", () => {
+	it("when() with mixed calls/says actions", () => {
 		const turn = when("do things", [
-			call("plan_mode", { enable: true }),
-			call("plan_propose", { title: "test" }),
-			say("done"),
+			calls("plan_mode", { enable: true }),
+			calls("plan_propose", { title: "test" }),
+			says("done"),
 		]);
 		expect(turn.actions).toHaveLength(3);
 		expect(turn.actions[0].type).toBe("call");
@@ -72,14 +72,24 @@ describe("when/call/say DSL", () => {
 		expect(turn.actions[1].toolName).toBe("plan_propose");
 		expect(turn.actions[2].type).toBe("say");
 	});
+
+	it("deprecated call/say aliases still work", () => {
+		const turn = when("legacy", [
+			call("bash", { command: "ls" }),
+			say("done"),
+		]);
+		expect(turn.actions).toHaveLength(2);
+		expect(turn.actions[0].type).toBe("call");
+		expect(turn.actions[1].type).toBe("say");
+	});
 });
 
 describe("PlaybookStreamFn", () => {
 	it("dequeues actions in order", async () => {
 		const turns = [
 			when("test", [
-				call("bash", { command: "ls" }),
-				say("here are the files"),
+				calls("bash", { command: "ls" }),
+				says("here are the files"),
 			]),
 		];
 		const { streamFn, state } = createPlaybookStreamFn(turns);
@@ -106,7 +116,7 @@ describe("PlaybookStreamFn", () => {
 	});
 
 	it("returns exhausted message when playbook is done", async () => {
-		const turns = [when("test", [say("only one")])];
+		const turns = [when("test", [says("only one")])];
 		const { streamFn } = createPlaybookStreamFn(turns);
 		const model = mockModel();
 		const ctx = mockContext();
@@ -125,8 +135,8 @@ describe("PlaybookStreamFn", () => {
 		let dynamicId = "unknown";
 		const turns = [
 			when("test", [
-				call("tool", () => ({ id: dynamicId })),
-				say("done"),
+				calls("tool", () => ({ id: dynamicId })),
+				says("done"),
 			]),
 		];
 		const { streamFn } = createPlaybookStreamFn(turns);
@@ -144,8 +154,8 @@ describe("PlaybookStreamFn", () => {
 
 	it("flattens multiple turns into single queue", async () => {
 		const turns = [
-			when("first", [say("response 1")]),
-			when("second", [say("response 2")]),
+			when("first", [says("response 1")]),
+			when("second", [says("response 2")]),
 		];
 		const { streamFn, state } = createPlaybookStreamFn(turns);
 		const model = mockModel();

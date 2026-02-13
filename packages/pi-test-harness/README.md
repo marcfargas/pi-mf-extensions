@@ -28,7 +28,7 @@ npm install --save-dev @marcfargas/pi-test-harness
 import { describe, it, expect, afterEach } from "vitest";
 import {
   createTestSession,
-  when, call, say,
+  when, calls, says,
   type TestSession,
 } from "@marcfargas/pi-test-harness";
 
@@ -49,8 +49,8 @@ describe("my extension", () => {
 
     await t.run(
       when("List files in the project", [
-        call("bash", { command: "ls" }),
-        say("Found 2 files: file1.txt and file2.txt"),
+        calls("bash", { command: "ls" }),
+        says("Found 2 files: file1.txt and file2.txt"),
       ]),
     );
 
@@ -99,27 +99,27 @@ Defines a conversation turn — the prompt you'll send and what the model does i
 
 ```typescript
 when("Deploy the app", [
-  call("bash", { command: "npm run build" }),
-  call("bash", { command: "gcloud run deploy" }),
-  say("Deployed successfully."),
+  calls("bash", { command: "npm run build" }),
+  calls("bash", { command: "gcloud run deploy" }),
+  says("Deployed successfully."),
 ])
 ```
 
-### `call(tool, params)`
+### `calls(tool, params)`
 
-The model requests a tool call. Pi's hooks fire, the tool executes (real or mocked), result feeds back:
+The model calls a tool. Pi's hooks fire, the tool executes (real or mocked), result feeds back:
 
 ```typescript
-call("plan_mode", { enable: true })
-call("bash", { command: "ls -la" })
+calls("plan_mode", { enable: true })
+calls("bash", { command: "ls -la" })
 ```
 
-### `say(text)`
+### `says(text)`
 
 The model emits text. The agent turn ends:
 
 ```typescript
-say("All done. The deployment is complete.")
+says("All done. The deployment is complete.")
 ```
 
 ### Multi-turn conversations
@@ -129,12 +129,12 @@ Pass multiple turns to `run()`:
 ```typescript
 await t.run(
   when("What files are in the project?", [
-    call("bash", { command: "ls" }),
-    say("Found 3 files."),
+    calls("bash", { command: "ls" }),
+    says("Found 3 files."),
   ]),
   when("Now read the README", [
-    call("read", { path: "README.md" }),
-    say("Here's what it says..."),
+    calls("read", { path: "README.md" }),
+    says("Here's what it says..."),
   ]),
 );
 ```
@@ -173,7 +173,7 @@ let planId = "";
 
 await t.run(
   when("Create and approve a plan", [
-    call("plan_propose", {
+    calls("plan_propose", {
       title: "Send invoice",
       steps: [{ description: "Send email", tool: "go-easy", operation: "send" }],
     }).then((result) => {
@@ -181,8 +181,8 @@ await t.run(
       planId = result.text.match(/PLAN-[a-f0-9]+/)![0];
     }),
     // Late-bound: params resolved at call time, after .then() has fired
-    call("plan_approve", () => ({ id: planId })),
-    say("Plan approved and executing."),
+    calls("plan_approve", () => ({ id: planId })),
+    says("Plan approved and executing."),
   ]),
 );
 
@@ -285,7 +285,7 @@ The harness auto-asserts that all playbook actions are consumed after `run()` co
 ```
 Playbook exhausted unexpectedly.
   Consumed 2 action(s).
-  Last consumed: call("bash", {"command":"ls"}) at step 2
+  Last consumed: calls("bash", {"command":"ls"}) at step 2
 
   The agent loop called streamFn but no more playbook actions were available.
   This usually means a tool call produced an unexpected result that caused
@@ -296,8 +296,8 @@ Playbook exhausted unexpectedly.
 Playbook not fully consumed after run() completed.
   Consumed 1 of 3 action(s).
   Remaining:
-    - call("write", {"path":"out.txt","content":"hello"})
-    - say("Done writing.")
+    - calls("write", {"path":"out.txt","content":"hello"})
+    - says("Done writing.")
 
   The agent loop ended before all playbook actions were used.
   This usually means a tool was blocked by a hook or returned early,
@@ -334,8 +334,8 @@ const result = await verifySandboxInstall({
     mockTools: { bash: "ok", read: "contents", write: "written", edit: "edited" },
     script: [
       when("Test", [
-        call("my_tool", { value: "test" }),
-        say("Works."),
+        calls("my_tool", { value: "test" }),
+        says("Works."),
       ]),
     ],
   },
@@ -407,7 +407,7 @@ interface MockUIConfig {
 Testing an extension that registers 8 tools, blocks writes in plan mode, and manages plan lifecycle:
 
 ```typescript
-import { createTestSession, when, call, say, type TestSession } from "@marcfargas/pi-test-harness";
+import { createTestSession, when, calls, says, type TestSession } from "@marcfargas/pi-test-harness";
 import * as path from "node:path";
 
 const EXTENSION = path.resolve(__dirname, "../../src/index.ts");
@@ -430,8 +430,8 @@ describe("pi-planner", () => {
 
     await t.run(
       when("Plan the deployment", [
-        call("plan_mode", { enable: true }),
-        call("plan_propose", {
+        calls("plan_mode", { enable: true }),
+        calls("plan_propose", {
           title: "Deploy v2",
           steps: [
             { description: "Build", tool: "bash", operation: "build" },
@@ -440,7 +440,7 @@ describe("pi-planner", () => {
         }).then((r) => {
           planId = r.text.match(/PLAN-[a-f0-9]+/)![0];
         }),
-        say("Plan proposed."),
+        says("Plan proposed."),
       ]),
     );
 

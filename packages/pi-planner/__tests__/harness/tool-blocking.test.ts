@@ -7,7 +7,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import * as path from "node:path";
-import { createTestSession, when, call, say, type TestSession } from "@marcfargas/pi-test-harness";
+import { createTestSession, when, calls, says, type TestSession } from "@marcfargas/pi-test-harness";
 
 const EXTENSION_PATH = path.resolve(__dirname, "../../src/index.ts");
 
@@ -37,9 +37,9 @@ describe("pi-planner: tool blocking in plan mode", () => {
 
 		await t.run(
 			when("Enter plan mode then try to write", [
-				call("plan_mode", { enable: true }),
-				call("write", { path: "test.txt", content: "hello" }),
-				say("Write was blocked."),
+				calls("plan_mode", { enable: true }),
+				calls("write", { path: "test.txt", content: "hello" }),
+				says("Write was blocked."),
 			]),
 		);
 
@@ -58,9 +58,9 @@ describe("pi-planner: tool blocking in plan mode", () => {
 
 		await t.run(
 			when("Enter plan mode then try to edit", [
-				call("plan_mode", { enable: true }),
-				call("edit", { path: "test.txt", oldText: "a", newText: "b" }),
-				say("Edit was blocked."),
+				calls("plan_mode", { enable: true }),
+				calls("edit", { path: "test.txt", oldText: "a", newText: "b" }),
+				says("Edit was blocked."),
 			]),
 		);
 
@@ -78,9 +78,9 @@ describe("pi-planner: tool blocking in plan mode", () => {
 
 		await t.run(
 			when("Run a safe command in plan mode", [
-				call("plan_mode", { enable: true }),
-				call("bash", { command: "ls -la" }),
-				say("Listed files."),
+				calls("plan_mode", { enable: true }),
+				calls("bash", { command: "ls -la" }),
+				says("Listed files."),
 			]),
 		);
 
@@ -98,9 +98,9 @@ describe("pi-planner: tool blocking in plan mode", () => {
 
 		await t.run(
 			when("Try a destructive command in plan mode", [
-				call("plan_mode", { enable: true }),
-				call("bash", { command: "rm -rf /tmp/test" }),
-				say("Command was blocked."),
+				calls("plan_mode", { enable: true }),
+				calls("bash", { command: "rm -rf /tmp/test" }),
+				says("Command was blocked."),
 			]),
 		);
 
@@ -118,9 +118,9 @@ describe("pi-planner: tool blocking in plan mode", () => {
 
 		await t.run(
 			when("Try npm install in plan mode", [
-				call("plan_mode", { enable: true }),
-				call("bash", { command: "npm install lodash" }),
-				say("npm was blocked."),
+				calls("plan_mode", { enable: true }),
+				calls("bash", { command: "npm install lodash" }),
+				says("npm was blocked."),
 			]),
 		);
 
@@ -137,10 +137,10 @@ describe("pi-planner: tool blocking in plan mode", () => {
 
 		await t.run(
 			when("Git operations in plan mode", [
-				call("plan_mode", { enable: true }),
-				call("bash", { command: "git status" }),
-				call("bash", { command: "git push origin main" }),
-				say("Git status worked, push blocked."),
+				calls("plan_mode", { enable: true }),
+				calls("bash", { command: "git status" }),
+				calls("bash", { command: "git push origin main" }),
+				says("Git status worked, push blocked."),
 			]),
 		);
 
@@ -161,10 +161,10 @@ describe("pi-planner: tool blocking in plan mode", () => {
 
 		await t.run(
 			when("Enter, exit, then write", [
-				call("plan_mode", { enable: true }),
-				call("plan_mode", { enable: false }),
-				call("write", { path: "test.txt", content: "hello" }),
-				say("Write succeeded."),
+				calls("plan_mode", { enable: true }),
+				calls("plan_mode", { enable: false }),
+				calls("write", { path: "test.txt", content: "hello" }),
+				says("Write succeeded."),
 			]),
 		);
 

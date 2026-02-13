@@ -7,7 +7,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import * as path from "node:path";
-import { createTestSession, when, call, say, type TestSession } from "@marcfargas/pi-test-harness";
+import { createTestSession, when, calls, says, type TestSession } from "@marcfargas/pi-test-harness";
 
 const EXTENSION_PATH = path.resolve(__dirname, "../../src/index.ts");
 
@@ -33,7 +33,7 @@ describe("pi-planner: safety registry via harness", () => {
 
 		await t.run(
 			when("Register safety patterns", [
-				call("plan_skill_safety", {
+				calls("plan_skill_safety", {
 					tool: "go-gmail",
 					commands: {
 						"npx go-gmail * search *": "READ",
@@ -43,7 +43,7 @@ describe("pi-planner: safety registry via harness", () => {
 					},
 					default: "WRITE",
 				}),
-				say("Patterns registered."),
+				says("Patterns registered."),
 			]),
 		);
 
@@ -62,7 +62,7 @@ describe("pi-planner: safety registry via harness", () => {
 
 		await t.run(
 			when("Register safety then use READ in plan mode", [
-				call("plan_skill_safety", {
+				calls("plan_skill_safety", {
 					tool: "go-gmail",
 					commands: {
 						"npx go-gmail * search *": "READ",
@@ -70,10 +70,10 @@ describe("pi-planner: safety registry via harness", () => {
 					},
 					default: "WRITE",
 				}),
-				call("plan_mode", { enable: true }),
+				calls("plan_mode", { enable: true }),
 				// This should be ALLOWED — it's a READ operation
-				call("bash", { command: "npx go-gmail marc@test.com search 'invoice'" }),
-				say("Search succeeded in plan mode."),
+				calls("bash", { command: "npx go-gmail marc@test.com search 'invoice'" }),
+				says("Search succeeded in plan mode."),
 			]),
 		);
 
@@ -91,7 +91,7 @@ describe("pi-planner: safety registry via harness", () => {
 
 		await t.run(
 			when("Register safety then use WRITE in plan mode", [
-				call("plan_skill_safety", {
+				calls("plan_skill_safety", {
 					tool: "go-gmail",
 					commands: {
 						"npx go-gmail * search *": "READ",
@@ -99,10 +99,10 @@ describe("pi-planner: safety registry via harness", () => {
 					},
 					default: "WRITE",
 				}),
-				call("plan_mode", { enable: true }),
+				calls("plan_mode", { enable: true }),
 				// This should be BLOCKED — it's a WRITE operation
-				call("bash", { command: "npx go-gmail marc@test.com send --to bob@test.com" }),
-				say("Send was blocked."),
+				calls("bash", { command: "npx go-gmail marc@test.com send --to bob@test.com" }),
+				says("Send was blocked."),
 			]),
 		);
 
@@ -120,22 +120,22 @@ describe("pi-planner: safety registry via harness", () => {
 
 		await t.run(
 			when("Register multiple tools", [
-				call("plan_skill_safety", {
+				calls("plan_skill_safety", {
 					tool: "go-gmail",
 					commands: { "npx go-gmail * search *": "READ" },
 					default: "WRITE",
 				}),
-				call("plan_skill_safety", {
+				calls("plan_skill_safety", {
 					tool: "gcloud",
 					commands: { "gcloud * list *": "READ", "gcloud * describe *": "READ" },
 					default: "WRITE",
 				}),
-				call("plan_mode", { enable: true }),
+				calls("plan_mode", { enable: true }),
 				// Gmail search: READ → allowed
-				call("bash", { command: "npx go-gmail marc search 'test'" }),
+				calls("bash", { command: "npx go-gmail marc search 'test'" }),
 				// gcloud list: READ → allowed (trailing flag needed for "* list *" glob)
-				call("bash", { command: "gcloud compute instances list --format=json" }),
-				say("Both READ operations worked."),
+				calls("bash", { command: "gcloud compute instances list --format=json" }),
+				says("Both READ operations worked."),
 			]),
 		);
 
@@ -153,17 +153,17 @@ describe("pi-planner: safety registry via harness", () => {
 
 		await t.run(
 			when("Register safety then run unregistered command", [
-				call("plan_skill_safety", {
+				calls("plan_skill_safety", {
 					tool: "go-gmail",
 					commands: { "npx go-gmail * search *": "READ" },
 					default: "WRITE",
 				}),
-				call("plan_mode", { enable: true }),
+				calls("plan_mode", { enable: true }),
 				// "ls" is not in the safety registry → falls through to allowlist → allowed
-				call("bash", { command: "ls -la" }),
+				calls("bash", { command: "ls -la" }),
 				// "curl" is in the allowlist → allowed
-				call("bash", { command: "curl https://example.com" }),
-				say("Unregistered commands handled by allowlist."),
+				calls("bash", { command: "curl https://example.com" }),
+				says("Unregistered commands handled by allowlist."),
 			]),
 		);
 
@@ -189,15 +189,15 @@ describe("pi-planner: tool sequence verification", () => {
 
 		await t.run(
 			when("Full plan mode workflow", [
-				call("plan_mode", { enable: true }),
-				call("bash", { command: "ls" }),
-				call("plan_propose", {
+				calls("plan_mode", { enable: true }),
+				calls("bash", { command: "ls" }),
+				calls("plan_propose", {
 					title: "Test plan",
 					steps: [{ description: "Do thing", tool: "bash", operation: "run" }],
 				}),
-				call("plan_list", {}),
-				call("plan_mode", { enable: false }),
-				say("Workflow complete."),
+				calls("plan_list", {}),
+				calls("plan_mode", { enable: false }),
+				says("Workflow complete."),
 			]),
 		);
 

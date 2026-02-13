@@ -7,7 +7,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import * as path from "node:path";
-import { createTestSession, when, call, say, type TestSession } from "@marcfargas/pi-test-harness";
+import { createTestSession, when, calls, says, type TestSession } from "@marcfargas/pi-test-harness";
 
 const EXTENSION_PATH = path.resolve(__dirname, "../../src/index.ts");
 
@@ -35,7 +35,7 @@ describe("pi-planner: plan lifecycle via harness", () => {
 
 		await t.run(
 			when("Propose and get plan", [
-				call("plan_propose", {
+				calls("plan_propose", {
 					title: "Send invoice reminder",
 					steps: [
 						{ description: "Read invoice", tool: "odoo", operation: "read", target: "INV-001" },
@@ -45,8 +45,8 @@ describe("pi-planner: plan lifecycle via harness", () => {
 				}).then((r) => {
 					planId = r.text.match(/PLAN-[a-f0-9]+/)![0];
 				}),
-				call("plan_get", () => ({ id: planId })),
-				say("Plan details retrieved."),
+				calls("plan_get", () => ({ id: planId })),
+				says("Plan details retrieved."),
 			]),
 		);
 
@@ -70,7 +70,7 @@ describe("pi-planner: plan lifecycle via harness", () => {
 
 		await t.run(
 			when("Propose and approve plan", [
-				call("plan_propose", {
+				calls("plan_propose", {
 					title: "Deploy to staging",
 					steps: [
 						{ description: "Build project", tool: "bash", operation: "build" },
@@ -78,8 +78,8 @@ describe("pi-planner: plan lifecycle via harness", () => {
 				}).then((r) => {
 					planId = r.text.match(/PLAN-[a-f0-9]+/)![0];
 				}),
-				call("plan_approve", () => ({ id: planId })),
-				say("Plan approved."),
+				calls("plan_approve", () => ({ id: planId })),
+				says("Plan approved."),
 			]),
 		);
 
@@ -100,7 +100,7 @@ describe("pi-planner: plan lifecycle via harness", () => {
 
 		await t.run(
 			when("Propose and reject plan", [
-				call("plan_propose", {
+				calls("plan_propose", {
 					title: "Delete database",
 					steps: [
 						{ description: "Drop tables", tool: "odoo", operation: "write" },
@@ -108,8 +108,8 @@ describe("pi-planner: plan lifecycle via harness", () => {
 				}).then((r) => {
 					planId = r.text.match(/PLAN-[a-f0-9]+/)![0];
 				}),
-				call("plan_reject", () => ({ id: planId, feedback: "Too dangerous, needs review" })),
-				say("Plan rejected."),
+				calls("plan_reject", () => ({ id: planId, feedback: "Too dangerous, needs review" })),
+				says("Plan rejected."),
 			]),
 		);
 
@@ -127,16 +127,16 @@ describe("pi-planner: plan lifecycle via harness", () => {
 
 		await t.run(
 			when("Create two plans and list", [
-				call("plan_propose", {
+				calls("plan_propose", {
 					title: "First plan",
 					steps: [{ description: "Step 1", tool: "bash", operation: "run" }],
 				}),
-				call("plan_propose", {
+				calls("plan_propose", {
 					title: "Second plan",
 					steps: [{ description: "Step A", tool: "go-easy", operation: "send" }],
 				}),
-				call("plan_list", {}),
-				say("Plans listed."),
+				calls("plan_list", {}),
+				says("Plans listed."),
 			]),
 		);
 
@@ -157,19 +157,19 @@ describe("pi-planner: plan lifecycle via harness", () => {
 
 		await t.run(
 			when("Create, reject one, list proposed", [
-				call("plan_propose", {
+				calls("plan_propose", {
 					title: "Kept plan",
 					steps: [{ description: "Step", tool: "bash", operation: "run" }],
 				}),
-				call("plan_propose", {
+				calls("plan_propose", {
 					title: "Rejected plan",
 					steps: [{ description: "Step", tool: "bash", operation: "run" }],
 				}).then((r) => {
 					planId = r.text.match(/PLAN-[a-f0-9]+/)![0];
 				}),
-				call("plan_reject", () => ({ id: planId })),
-				call("plan_list", { status: "proposed" }),
-				say("Filtered list."),
+				calls("plan_reject", () => ({ id: planId })),
+				calls("plan_list", { status: "proposed" }),
+				says("Filtered list."),
 			]),
 		);
 
@@ -187,8 +187,8 @@ describe("pi-planner: plan lifecycle via harness", () => {
 
 		await t.run(
 			when("Get non-existent plan", [
-				call("plan_get", { id: "PLAN-00000000" }),
-				say("Not found."),
+				calls("plan_get", { id: "PLAN-00000000" }),
+				says("Not found."),
 			]),
 		);
 
@@ -206,8 +206,8 @@ describe("pi-planner: plan lifecycle via harness", () => {
 
 		await t.run(
 			when("Approve non-existent", [
-				call("plan_approve", { id: "PLAN-00000000" }),
-				say("Failed."),
+				calls("plan_approve", { id: "PLAN-00000000" }),
+				says("Failed."),
 			]),
 		);
 
@@ -232,12 +232,12 @@ describe("pi-planner: plan_run_script via harness", () => {
 
 		await t.run(
 			when("Try to report without execution", [
-				call("plan_run_script", {
+				calls("plan_run_script", {
 					action: "step_complete",
 					step: 1,
 					summary: "Did something",
 				}),
-				say("No active execution."),
+				says("No active execution."),
 			]),
 		);
 

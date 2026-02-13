@@ -1,5 +1,17 @@
 # @marcfargas/pi-test-harness
 
+## 0.3.0
+
+### Minor Changes
+
+- Rename DSL: `call()` → `calls()`, `say()` → `says()`.
+
+  The new names read more naturally as playbook declarations:
+  `when("Deploy", [calls("bash", ...), says("Done.")])` reads as
+  "when prompted 'Deploy', the model calls bash then says 'Done.'"
+
+  The old `call()` and `say()` are kept as deprecated aliases (removal in v0.4).
+
 ## 0.2.0
 
 ### Minor Changes
