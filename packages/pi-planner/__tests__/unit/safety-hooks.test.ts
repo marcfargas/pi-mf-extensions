@@ -28,7 +28,7 @@ describe("safety registry + plan mode integration", () => {
 		registry = new SafetyRegistry();
 
 		// Register go-easy Gmail patterns (as the agent would after reading the skill)
-		registry.register("npx go-gmail", {
+		registry.register("go-gmail", {
 			"npx go-gmail * search *": "READ",
 			"npx go-gmail * get *": "READ",
 			"npx go-gmail * thread *": "READ",
@@ -130,9 +130,9 @@ describe("safety registry + plan mode integration", () => {
 			expect(planModeBashDecision("npx go-drive marc list")).toBe("block-allowlist");
 		});
 
-		it("unknown operation on registered tool falls through", () => {
-			// "batch-modify" not in go-gmail patterns
-			expect(planModeBashDecision("npx go-gmail marc batch-modify --add=STARRED")).toBeNull;
+		it("unknown operation on registered tool blocked by allowlist", () => {
+			// "batch-modify" not in go-gmail patterns → falls through to allowlist → blocked
+			expect(planModeBashDecision("npx go-gmail marc batch-modify --add=STARRED")).toBe("block-allowlist");
 		});
 	});
 

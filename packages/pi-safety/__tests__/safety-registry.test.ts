@@ -51,9 +51,9 @@ describe("SafetyRegistry", () => {
 
 		it("rejects patterns that don't start with tool name", () => {
 			const result = registry.register("go-gmail", {
-				"npx go-calendar * list *": "READ",
-				"* search *": "READ",
-				"search go-gmail": "READ",
+				"npx go-calendar * list *": "READ",  // wrong tool name after npx
+				"* search *": "READ",                 // wildcard before tool name
+				"search go-gmail": "READ",            // tool name not at start
 			});
 			expect(result.accepted).toBe(0);
 			expect(result.rejected).toHaveLength(3);
@@ -61,11 +61,20 @@ describe("SafetyRegistry", () => {
 		});
 
 		it("accepts patterns starting with tool name", () => {
-			const result = registry.register("npx go-gmail", {
+			const result = registry.register("go-gmail", {
+				"go-gmail * search *": "READ",
+				"go-gmail * send *": "WRITE",
+			});
+			expect(result.accepted).toBe(2);
+		});
+
+		it("accepts patterns with runner prefix (npx, node, etc.)", () => {
+			const result = registry.register("go-gmail", {
 				"npx go-gmail * search *": "READ",
 				"npx go-gmail * send *": "WRITE",
 			});
 			expect(result.accepted).toBe(2);
+			expect(result.rejected).toHaveLength(0);
 		});
 
 		it("replaces previous registration for same tool", () => {
@@ -107,7 +116,7 @@ describe("SafetyRegistry", () => {
 
 	describe("resolve", () => {
 		beforeEach(() => {
-			registry.register("npx go-gmail", {
+			registry.register("go-gmail", {
 				"npx go-gmail * search *": "READ",
 				"npx go-gmail * get *": "READ",
 				"npx go-gmail * thread *": "READ",

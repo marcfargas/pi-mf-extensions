@@ -124,9 +124,20 @@ function validatePattern(tool: string, pattern: string, level: string): PatternV
 		return { pattern, valid: false, reason: "pattern is only wildcards" };
 	}
 
-	// Must start with the tool name (prevents "* list *" → READ matching anything)
-	if (!trimmed.startsWith(tool)) {
-		return { pattern, valid: false, reason: `pattern must start with tool name "${tool}"` };
+	// Pattern must start with the tool name, optionally preceded by a known runner prefix
+	// (npx, node, python, etc.). This prevents overly broad patterns.
+	const RUNNER_PREFIXES = ["npx", "node", "python", "python3", "deno", "bun", "ruby", "java", "dotnet"];
+	const parts = trimmed.split(/\s+/);
+	const firstPart = parts[0];
+	const secondPart = parts[1];
+
+	const startsWithTool = firstPart === tool || firstPart.startsWith(tool);
+	const startsWithRunner = RUNNER_PREFIXES.includes(firstPart)
+		&& secondPart != null
+		&& (secondPart === tool || secondPart.startsWith(tool));
+
+	if (!startsWithTool && !startsWithRunner) {
+		return { pattern, valid: false, reason: `pattern must start with tool name "${tool}" (or a runner prefix like "npx ${tool}")` };
 	}
 
 	return { pattern, valid: true };

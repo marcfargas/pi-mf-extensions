@@ -184,7 +184,7 @@ export async function finishExecution(
 	state: ExecutionState,
 	result: ExecutionResult,
 	pi: ExtensionAPI,
-	ctx: ExtensionContext,
+	_ctx: ExtensionContext,
 ): Promise<void> {
 	state.done = true;
 	state.result = result;

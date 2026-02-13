@@ -1,0 +1,39 @@
+{
+  "name": "@marcfargas/pi-test-harness",
+  "version": "0.2.0",
+  "description": "Test harness for pi extensions — playbook-based model mocking, session testing, sandbox install verification",
+  "author": "Marc Fargas",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcfargas/pi-mf-extensions.git",
+    "directory": "packages/pi-test-harness"
+  },
+  "keywords": [
+    "pi",
+    "pi-package",
+    "testing",
+    "test-harness",
+    "mock",
+    "playbook"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.50.0",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-agent-core": "*"
+  }
+}

@@ -1,6 +1,7 @@
 {
   "name": "pi-mf-extensions",
   "private": true,
+  "type": "module",
   "description": "Pi extensions by Marc Fargas — planner, safety, and more",
   "workspaces": [
     "packages/*"
@@ -8,17 +9,22 @@
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint packages/",
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "changeset publish"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.0",
     "@changesets/changelog-github": "^0.5.0",
+    "@changesets/cli": "^2.29.0",
+    "@eslint/js": "^9.39.2",
     "@mariozechner/pi-coding-agent": "^0.52.0",
     "@sinclair/typebox": "^0.34.0",
     "@types/node": "^22.0.0",
+    "eslint": "^9.39.2",
+    "globals": "^17.3.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.55.0",
     "vitest": "^3.0.0"
   }
 }

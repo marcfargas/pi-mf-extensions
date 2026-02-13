@@ -140,7 +140,7 @@ export function registerModeHooks(
 			"and call plan_skill_safety with command-matching glob patterns.",
 			"",
 			"Use glob patterns that match how the CLI is actually invoked in bash.",
-			"Use * as wildcard. Patterns MUST start with the tool/CLI name.",
+			"Use * as wildcard. Patterns must start with the tool/CLI name (or a runner prefix like npx).",
 			"Collapse all non-READ levels to WRITE. Only READ and WRITE are valid.",
 			"If in doubt, classify as WRITE.",
 			"",

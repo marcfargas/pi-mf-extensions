@@ -1,6 +1,6 @@
 {
   "name": "@marcfargas/pi-safety",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Safety classification registry for pi agent tool calls — glob-based READ/WRITE command matching",
   "author": "Marc Fargas",
   "license": "MIT",

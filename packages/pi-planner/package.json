@@ -1,6 +1,6 @@
 {
   "name": "@marcfargas/pi-planner",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Persistent, auditable plan-then-execute workflow for pi agents",
   "author": "Marc Fargas",
   "license": "MIT",
@@ -31,7 +31,7 @@
     ]
   },
   "dependencies": {
-    "@marcfargas/pi-safety": "^0.1.0"
+    "@marcfargas/pi-safety": "^0.1.1"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": ">=0.50.0"

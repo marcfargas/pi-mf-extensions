@@ -11,9 +11,9 @@ import * as crypto from "node:crypto";
 import { type Plan, type PlanListOptions, type PlanStep, type PlanStatus } from "./types.js";
 
 const PLANS_DIR = ".pi/plans";
-const SESSIONS_DIR = ".pi/plans/sessions";
-const ARTIFACTS_DIR = ".pi/plans/artifacts";
-const ARCHIVE_DIR = ".pi/plans/archive";
+const _SESSIONS_DIR = ".pi/plans/sessions";
+const _ARTIFACTS_DIR = ".pi/plans/artifacts";
+const _ARCHIVE_DIR = ".pi/plans/archive";
 
 export class PlanStore {
 	private readonly plansDir: string;
