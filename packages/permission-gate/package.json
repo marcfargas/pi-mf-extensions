@@ -1,5 +1,6 @@
 {
   "name": "@marcfargas/permission-gate",
+  "private": true,
   "version": "0.1.0",
   "description": "Tool permission enforcement for pi agents — gates tool calls based on safety classifications",
   "author": "Marc Fargas",
