@@ -11,6 +11,7 @@ Small, focused extensions for the pi coding agent — published independently vi
 | Package | Description | npm |
 |---------|-------------|-----|
 | [@marcfargas/pi-planner](packages/pi-planner/) | Plan-then-execute workflow for agents | [![npm](https://img.shields.io/npm/v/@marcfargas/pi-planner)](https://www.npmjs.com/package/@marcfargas/pi-planner) |
+| [@marcfargas/pi-powershell](packages/pi-powershell/) | PowerShell tool for Windows system integration | [![npm](https://img.shields.io/npm/v/@marcfargas/pi-powershell)](https://www.npmjs.com/package/@marcfargas/pi-powershell) |
 | [@marcfargas/pi-safety](packages/pi-safety/) | Safety classification registry | [![npm](https://img.shields.io/npm/v/@marcfargas/pi-safety)](https://www.npmjs.com/package/@marcfargas/pi-safety) |
 | [@marcfargas/pi-test-harness](packages/pi-test-harness/) | Test harness for pi extensions | [![npm](https://img.shields.io/npm/v/@marcfargas/pi-test-harness)](https://www.npmjs.com/package/@marcfargas/pi-test-harness) |
 | [@marcfargas/permission-gate](packages/permission-gate/) | Tool permission enforcement _(skeleton)_ | — |
@@ -35,6 +36,24 @@ npm install @marcfargas/pi-planner
 Plans persist as markdown in `.pi/plans/` — auditable, diffable, survives crashes. Includes plan mode (read-only tool restriction), skill safety registry (LLM-as-parser for READ/WRITE classification), retry/clone for failed plans, and crash recovery.
 
 → [Full documentation](packages/pi-planner/README.md)
+
+### [@marcfargas/pi-powershell](packages/pi-powershell/)
+
+PowerShell tool for Windows system integration and background processes. Solves Git Bash limitations that cause session hangs and orphaned processes.
+
+```bash
+npm install @marcfargas/pi-powershell
+```
+
+```json
+{ "pi": { "extensions": ["@marcfargas/pi-powershell"] } }
+```
+
+**Tools:** `powershell`, `pwsh-start-job`, `pwsh-get-job`, `pwsh-stop-job`, `pwsh-remove-job`, `pwsh-get-job-output` — Execute PowerShell commands and manage background jobs with proper error handling.
+
+Use PowerShell for Windows-specific operations while keeping Bash for familiar Unix commands. Includes both a general PowerShell tool and specialized job management helpers for background processes, process control, Windows services, and system integration tasks that cause issues in Git Bash.
+
+→ [Full documentation](packages/pi-powershell/README.md)
 
 ## Libraries
 

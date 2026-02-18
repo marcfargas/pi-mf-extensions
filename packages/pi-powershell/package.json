@@ -1,0 +1,39 @@
+{
+  "name": "@marcfargas/pi-powershell",
+  "version": "0.1.0",
+  "description": "PowerShell tool for pi agents - Windows system integration and background processes",
+  "author": "Marc Fargas",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marcfargas/pi-mf-extensions.git",
+    "directory": "packages/pi-powershell"
+  },
+  "keywords": [
+    "pi",
+    "agent",
+    "powershell",
+    "windows",
+    "background-processes",
+    "system-integration"
+  ],
+  "files": [
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": ">=0.50.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  }
+}
