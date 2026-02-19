@@ -27,9 +27,9 @@ export interface PowerShellToolResult {
 }
 
 /**
- * Execute PowerShell command with proper error handling and output formatting.
+ * Direct PowerShell execution without any wrapping or error recovery.
  */
-export async function executePowerShell(options: PowerShellOptions): Promise<PowerShellResult> {
+async function executePowerShellDirect(options: PowerShellOptions): Promise<PowerShellResult> {
 	const { command, timeout = 30000, workingDirectory } = options;
 
 	return new Promise((resolve) => {
@@ -50,7 +50,6 @@ export async function executePowerShell(options: PowerShellOptions): Promise<Pow
 		let stderr = '';
 		let timeoutId: NodeJS.Timeout | null = null;
 
-		// Set up timeout
 		if (timeout > 0) {
 			timeoutId = setTimeout(() => {
 				child.kill('SIGTERM');
@@ -63,7 +62,6 @@ export async function executePowerShell(options: PowerShellOptions): Promise<Pow
 			}, timeout);
 		}
 
-		// Collect output
 		child.stdout?.on('data', (data) => {
 			stdout += data.toString();
 		});
@@ -73,10 +71,7 @@ export async function executePowerShell(options: PowerShellOptions): Promise<Pow
 		});
 
 		child.on('close', (code) => {
-			if (timeoutId) {
-				clearTimeout(timeoutId);
-			}
-			
+			if (timeoutId) clearTimeout(timeoutId);
 			resolve({
 				stdout: stdout.trim(),
 				stderr: stderr.trim(),
@@ -86,10 +81,7 @@ export async function executePowerShell(options: PowerShellOptions): Promise<Pow
 		});
 
 		child.on('error', (err) => {
-			if (timeoutId) {
-				clearTimeout(timeoutId);
-			}
-			
+			if (timeoutId) clearTimeout(timeoutId);
 			resolve({
 				stdout: stdout,
 				stderr: `Failed to start PowerShell: ${err.message}`,
@@ -97,6 +89,83 @@ export async function executePowerShell(options: PowerShellOptions): Promise<Pow
 				success: false,
 			});
 		});
+	});
+}
+
+/**
+ * Check if a command needs batch file wrapping using Get-Command.
+ */
+async function needsBatchWrapping(command: string): Promise<boolean> {
+	const trimmed = command.trim();
+	const firstWord = trimmed.split(/\s+/)[0];
+	
+	if (!firstWord) return false;
+	
+	try {
+		const result = await executePowerShellDirect({
+			command: `Get-Command '${firstWord}' -ErrorAction SilentlyContinue | Select-Object CommandType | ConvertTo-Json`,
+			timeout: 3000
+		});
+		
+		if (result.success && result.stdout) {
+			const cmdInfo = JSON.parse(result.stdout);
+			// ExternalScript typically means .cmd, .bat files
+			return cmdInfo.CommandType === 'ExternalScript';
+		}
+	} catch {
+		// If we can't determine, err on the side of caution
+	}
+	
+	return false;
+}
+
+/**
+ * Execute PowerShell command with smart batch file handling and error recovery.
+ * Uses try-first-then-wrap approach for maximum reliability.
+ */
+export async function executePowerShell(options: PowerShellOptions): Promise<PowerShellResult> {
+	const { command, timeout = 30000, workingDirectory } = options;
+	
+	// First try: execute command as-is
+	const firstResult = await executePowerShellDirect({
+		command,
+		timeout,
+		workingDirectory
+	});
+	
+	// Check for Win32 batch file error
+	const isWin32Error = firstResult.stderr.includes('no es una aplicación Win32 válida') ||
+						firstResult.stderr.includes('is not a valid Win32 application') ||
+						firstResult.stderr.includes('cannot run due to the error');
+	
+	if (!firstResult.success && isWin32Error) {
+		// Second try: wrap with cmd /c for batch files
+		const wrappedCommand = `cmd /c "${command}"`;
+		return await executePowerShellDirect({
+			command: wrappedCommand,
+			timeout,
+			workingDirectory
+		});
+	}
+	
+	return firstResult;
+}
+
+/**
+ * Execute PowerShell command with pre-emptive batch file detection.
+ * Uses Get-Command to detect batch files before execution.
+ */
+export async function executePowerShellWithBatchDetection(options: PowerShellOptions): Promise<PowerShellResult> {
+	const { command, timeout = 30000, workingDirectory } = options;
+	
+	// Smart detection: check if command needs batch wrapping
+	const needsWrapping = await needsBatchWrapping(command);
+	const finalCommand = needsWrapping ? `cmd /c "${command}"` : command;
+	
+	return await executePowerShellDirect({
+		command: finalCommand,
+		timeout,
+		workingDirectory
 	});
 }
 
@@ -109,9 +178,10 @@ function createResult(text: string, details: PowerShellToolResult, isError = fal
 }
 
 /**
- * Register PowerShell tool with pi agent.
+ * Register PowerShell tools with pi agent.
  */
 export function registerPowerShellTool(pi: ExtensionAPI): void {
+	// Main PowerShell tool with error recovery
 	pi.registerTool({
 		name: "powershell",
 		label: "PowerShell",
@@ -152,6 +222,91 @@ export function registerPowerShellTool(pi: ExtensionAPI): void {
 				}
 
 				// Truncate large outputs (similar to bash tool behavior)
+				const maxLines = 2000;
+				const maxBytes = 50 * 1024; // 50KB
+				
+				const lines = output.split('\n');
+				let truncated = false;
+				
+				if (lines.length > maxLines) {
+					output = lines.slice(0, maxLines).join('\n');
+					truncated = true;
+				}
+				
+				if (Buffer.byteLength(output, 'utf8') > maxBytes) {
+					output = Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
+					truncated = true;
+				}
+				
+				if (truncated) {
+					output += '\n... [Output truncated]';
+				}
+
+				return createResult(
+					output || "(no output)",
+					{
+						exitCode: result.exitCode,
+						success: result.success,
+						command: command,
+					}
+				);
+
+			} catch (error) {
+				return createResult(
+					`PowerShell execution failed: ${error instanceof Error ? error.message : String(error)}`,
+					{
+						exitCode: -1,
+						success: false,
+						command: command,
+						error: String(error),
+					},
+					true
+				);
+			}
+		}
+	});
+
+	// pwsh-run tool with pre-emptive batch detection
+	pi.registerTool({
+		name: "pwsh-run",
+		label: "PowerShell Run",
+		description: "Execute commands with smart batch file detection. Like powershell tool but with pre-emptive Get-Command checking for more reliable batch file handling.",
+		parameters: Type.Object({
+			command: Type.String({ description: "Command to execute with smart batch file wrapping" }),
+			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 30)" })),
+		}),
+		
+		async execute(
+			_toolCallId: string,
+			params: { command: string; timeout?: number },
+			_signal: AbortSignal | undefined,
+			_onUpdate: any,
+			ctx: ExtensionContext
+		) {
+			const { command, timeout = 30 } = params;
+			const timeoutMs = timeout * 1000;
+			const workingDirectory = ctx.cwd;
+
+			try {
+				const result = await executePowerShellWithBatchDetection({
+					command,
+					timeout: timeoutMs,
+					workingDirectory,
+				});
+
+				// Format output similar to bash tool
+				let output = '';
+				
+				if (result.stdout) {
+					output += result.stdout;
+				}
+				
+				if (result.stderr) {
+					if (output) output += '\n';
+					output += result.stderr;
+				}
+
+				// Truncate large outputs
 				const maxLines = 2000;
 				const maxBytes = 50 * 1024; // 50KB
 				

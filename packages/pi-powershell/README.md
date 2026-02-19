@@ -42,13 +42,13 @@ Instead of hanging Git Bash with `&`, use PowerShell jobs:
 // ❌ This hangs Git Bash sessions
 await tools.bash("npm run dev &");
 
-// ✅ Using job helpers (recommended)
+// ✅ Using job helpers (recommended) - batch commands handled automatically
 await tools['pwsh-start-job']({
     name: 'dev-server',
     command: 'npm run dev'
 });
 
-// ✅ Using general PowerShell tool
+// ✅ Using general PowerShell tool - batch commands wrapped automatically
 await tools.powershell(`
 $job = Start-Job -Name 'dev-server' -ScriptBlock { 
     Set-Location '${process.cwd()}'
@@ -57,6 +57,22 @@ $job = Start-Job -Name 'dev-server' -ScriptBlock {
 Get-Job -Name 'dev-server'
 `);
 ```
+
+### Synchronous Commands with Batch File Support
+
+For non-background commands that need reliable batch file handling:
+
+```javascript
+// ✅ Smart batch detection (checks with Get-Command first)
+await tools['pwsh-run']({ command: 'npm --version' });
+
+// ✅ Error recovery (tries command, retries with cmd /c if Win32 error)
+await tools.powershell({ command: 'npm install' });
+```
+
+**Batch Command Handling**: The extension automatically detects and properly wraps batch commands using two strategies:
+- **Error Recovery** (`powershell` tool): Try command first, wrap with `cmd /c` if Win32 error occurs
+- **Pre-emptive Detection** (`pwsh-run` tool): Use `Get-Command` to detect batch files before execution
 
 ### Process Management
 
@@ -142,7 +158,7 @@ Get-NetTCPConnection -LocalPort 5173 | ForEach-Object {
 
 ### Tool: `powershell`
 
-Execute PowerShell commands with proper error handling and output formatting.
+Execute PowerShell commands with error recovery for batch files.
 
 **Parameters:**
 - `command` (string): PowerShell command or script to execute
@@ -153,6 +169,24 @@ Execute PowerShell commands with proper error handling and output formatting.
 - `details.exitCode`: Process exit code
 - `details.success`: Boolean indicating success/failure
 - `details.command`: The executed command
+
+**Batch File Handling**: Uses try-first-then-wrap strategy. Executes command as-is, then retries with `cmd /c` wrapper if Win32 application error occurs.
+
+### Tool: `pwsh-run`
+
+Execute commands with pre-emptive batch file detection using Get-Command.
+
+**Parameters:**
+- `command` (string): Command to execute with smart batch file wrapping
+- `timeout` (number, optional): Timeout in seconds (default: 30)
+
+**Returns:**
+- `content`: Command output (stdout + stderr, truncated if large)
+- `details.exitCode`: Process exit code
+- `details.success`: Boolean indicating success/failure
+- `details.command`: The executed command
+
+**Batch File Handling**: Uses `Get-Command` to detect if the command is a batch file (CommandType: ExternalScript) and pre-emptively wraps with `cmd /c` if needed.
 
 ### Job Management Helpers
 
@@ -269,6 +303,18 @@ This tool works alongside other pi extensions:
 Failed to start PowerShell: spawn pwsh ENOENT
 ```
 Install PowerShell 7+: [Installation Guide](https://docs.microsoft.com/en-us/powershell/scripting/install/installing-powershell-on-windows)
+
+### Batch Command Errors (Fixed)
+```
+Start-Process: This command cannot be run due to the error: %1 no es una aplicación Win32 válida
+```
+This error occurred with npm/yarn commands because they're batch files, not executables. **Fixed in v2.0+**: The extension now automatically wraps batch commands with `cmd /c`.
+
+### Job Management Issues (Fixed)
+```
+Job 'my-job' not found or error
+```
+Previous versions had race conditions in job creation. **Fixed in v2.0+**: Added proper timing and retry logic for job registration.
 
 ### Execution Policy Errors
 This extension uses `-ExecutionPolicy Bypass` to avoid policy restrictions, but system policies may still interfere. To check:

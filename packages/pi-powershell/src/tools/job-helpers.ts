@@ -35,10 +35,28 @@ function escapeForPowerShell(str: string): string {
  */
 function parseJobInfo(output: string): JobInfo[] {
 	try {
-		const jobs = JSON.parse(output);
-		return Array.isArray(jobs) ? jobs : [jobs];
-	} catch {
+		// Clean up the output - remove any error messages before JSON
+		const lines = output.split('\n');
+		let jsonLine = '';
+		
+		for (const line of lines) {
+			const trimmed = line.trim();
+			if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+				jsonLine = trimmed;
+				break;
+			}
+		}
+		
+		if (!jsonLine) {
+			// No JSON found, return empty array
+			return [];
+		}
+		
+		const jobs = JSON.parse(jsonLine);
+		return Array.isArray(jobs) ? jobs : [jobs].filter(Boolean);
+	} catch (error) {
 		// Fallback parsing if JSON fails
+		console.warn('Failed to parse job info JSON:', error);
 		return [];
 	}
 }
@@ -67,16 +85,57 @@ export function registerJobHelpers(pi: ExtensionAPI): void {
 			const escapedWorkDir = escapeForPowerShell(workDir);
 
 			const powerShellScript = `
-				$job = Start-Job -Name '${escapedName}' -ScriptBlock {
-					Set-Location '${escapedWorkDir}'
-					${escapedCommand}
+				# Start the job with error trapping for batch files
+				try {
+					$job = Start-Job -Name '${escapedName}' -ScriptBlock {
+						Set-Location '${escapedWorkDir}'
+						try {
+							${escapedCommand}
+						} catch {
+							# If Win32 error (batch file issue), try with cmd /c
+							if ($_.Exception.Message -like '*Win32*' -or $_.Exception.Message -like '*no es una aplicación*') {
+								cmd /c "${escapedCommand}"
+							} else {
+								throw
+							}
+						}
+					}
+				} catch {
+					# If job creation fails, it might be a batch file command
+					if ($_.Exception.Message -like '*Win32*' -or $_.Exception.Message -like '*no es una aplicación*') {
+						# Retry with cmd /c wrapper
+						$job = Start-Job -Name '${escapedName}' -ScriptBlock {
+							Set-Location '${escapedWorkDir}'
+							cmd /c "${escapedCommand}"
+						}
+					} else {
+						throw
+					}
 				}
-				$job | Select-Object Id, Name, State, HasMoreData, Location, Command | ConvertTo-Json
+				
+				# Wait a moment for job to register properly
+				Start-Sleep -Milliseconds 200
+				
+				# Get job info with retry logic
+				$retryCount = 0
+				do {
+					$jobInfo = Get-Job -Name '${escapedName}' -ErrorAction SilentlyContinue
+					if ($jobInfo) { break }
+					Start-Sleep -Milliseconds 100
+					$retryCount++
+				} while ($retryCount -lt 10)
+				
+				if ($jobInfo) {
+					$jobInfo | Select-Object Id, Name, State, HasMoreData, Location, Command | ConvertTo-Json
+				} else {
+					Write-Error "Job created but not found after retries"
+				}
 			`;
 
 			const result = await executePowerShell({
 				command: powerShellScript.trim(),
 				workingDirectory: ctx.cwd,
+				timeout: 10000, // Longer timeout for job startup
 			});
 
 			if (!result.success) {
@@ -90,13 +149,20 @@ export function registerJobHelpers(pi: ExtensionAPI): void {
 			const jobs = parseJobInfo(result.stdout);
 			const job = jobs[0];
 
+			if (!job) {
+				return createJobResult(
+					`Job '${name}' started but could not retrieve job info`,
+					{ name, command, workingDirectory: workDir, warning: "Job info unavailable" }
+				);
+			}
+
 			return createJobResult(
-				`Started job '${name}' (ID: ${job?.id || 'unknown'})${job?.state ? ` - Status: ${job.state}` : ''}`,
+				`Started job '${name}' (ID: ${job.id}) - Status: ${job.state}`,
 				{ 
 					name, 
 					command, 
 					workingDirectory: workDir,
-					job: job || { name, command }
+					job
 				}
 			);
 		}

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import { executePowerShell } from "../src/tools/powershell.js";
+import { executePowerShell, executePowerShellWithBatchDetection } from "../src/tools/powershell.js";
 
 describe("PowerShell Tool", () => {
 	// Skip tests if PowerShell is not available
@@ -81,6 +81,78 @@ describe("PowerShell Tool", () => {
 			expect(result.exitCode).toBe(-1);
 			expect(result.stderr).toContain("timed out");
 		}, 10000);
+	});
+
+	describe("Batch Command Handling - Error Recovery", () => {
+		it("should handle npm commands with error recovery", async () => {
+			if (!isPowerShellAvailable) {
+				console.log("Skipping test: PowerShell not available");
+				return;
+			}
+
+			// Test that npm commands work via error recovery
+			const result = await executePowerShell({
+				command: "npm --version"
+			});
+
+			// Should not fail with "no es una aplicación Win32 válida" error
+			expect(result.success).toBe(true);
+			expect(result.stdout).toMatch(/^\d+\.\d+\.\d+/);
+		});
+
+		it("should handle other batch commands with error recovery", async () => {
+			if (!isPowerShellAvailable) {
+				console.log("Skipping test: PowerShell not available");
+				return;
+			}
+
+			// Test other common batch commands
+			const commands = ['npm --version', 'yarn --version'];
+			
+			for (const cmd of commands) {
+				const result = await executePowerShell({
+					command: cmd
+				});
+				
+				// Should not fail with batch file errors
+				if (!result.success) {
+					// Only acceptable failure is command not found (English or Spanish)
+					expect(result.stderr).toMatch(/(not recognized|not found|could not find|no se reconoce)/i);
+				}
+			}
+		});
+	});
+
+	describe("Batch Command Handling - Pre-emptive Detection", () => {
+		it("should handle npm commands with pre-emptive detection", async () => {
+			if (!isPowerShellAvailable) {
+				console.log("Skipping test: PowerShell not available");
+				return;
+			}
+
+			// Test that npm commands work via Get-Command detection
+			const result = await executePowerShellWithBatchDetection({
+				command: "npm --version"
+			});
+
+			expect(result.success).toBe(true);
+			expect(result.stdout).toMatch(/^\d+\.\d+\.\d+/);
+		});
+
+		it("should detect PowerShell native commands correctly", async () => {
+			if (!isPowerShellAvailable) {
+				console.log("Skipping test: PowerShell not available");
+				return;
+			}
+
+			// Test that native PowerShell commands work without wrapping
+			const result = await executePowerShellWithBatchDetection({
+				command: "Get-Date -Format 'yyyy-MM-dd'"
+			});
+
+			expect(result.success).toBe(true);
+			expect(result.stdout).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		});
 	});
 
 	describe("Background Jobs", () => {
