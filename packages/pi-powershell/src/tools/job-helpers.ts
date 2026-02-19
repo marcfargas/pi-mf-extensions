@@ -1,230 +1,94 @@
 /**
- * PowerShell job management helpers - high-level API for common background job operations.
+ * PowerShell background job management tools.
  */
 
-import type { ExtensionAPI, ExtensionContext, AgentToolResult } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, AgentToolResult, ToolRenderResultOptions } from "@mariozechner/pi-coding-agent";
+import { Theme } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { executePowerShell } from "./powershell.js";
 
-export interface JobInfo {
-	id: number;
-	name: string;
-	state: 'Running' | 'Completed' | 'Failed' | 'Stopped' | 'Blocked' | 'Suspended' | 'Disconnected';
-	hasMoreData: boolean;
-	location: string;
-	command: string;
+interface JobDetails {
+	name?: string;
+	command?: string;
+	output?: string;
+	error?: string;
+	success: boolean;
 }
 
-function createJobResult<T = unknown>(text: string, details: T, isError = false): AgentToolResult<T> {
-	return {
-		content: [{ type: "text", text }],
-		details,
-		...(isError ? { isError: true } : {}),
-	};
+function result(text: string, details: JobDetails): AgentToolResult<JobDetails> {
+	return { content: [{ type: "text", text }], details };
 }
 
-/**
- * Convert bash-style environment variable assignments to PowerShell syntax
- */
-function convertEnvVarsToPS(command: string): string {
-	// Simple regex to match: VARNAME=value (at start of line, with optional leading spaces)
-	// This handles the most common cases: VAR=value, VAR='value', VAR="value", VAR=''
-	const regex = /^(\s*)([A-Z_][A-Z0-9_]*)\s*=\s*('[^']*'|"[^"]*"|\S+)(\s+.*)?$/;
-	const match = command.match(regex);
-	
-	if (!match) {
-		return command; // No env var pattern found
+function jobRenderCall(args: Record<string, unknown>, theme: Theme) {
+	const name = args.name as string | undefined;
+	const label = name ? theme.fg("accent", name) : theme.fg("muted", "all");
+	return new Text(theme.fg("toolTitle", theme.bold("pwsh-job ")) + label, 0, 0);
+}
+
+function jobRenderResult(res: AgentToolResult<JobDetails>, options: ToolRenderResultOptions, theme: Theme) {
+	const text = res.content[0]?.type === "text" ? res.content[0].text : "";
+	if (!res.details?.success) return new Text(theme.fg("error", text), 0, 0);
+	if (!options.expanded) {
+		const first = text.split('\n')[0].slice(0, 120);
+		const lines = text.split('\n').length;
+		const suffix = lines > 1 ? theme.fg("muted", ` (${lines} lines)`) : "";
+		return new Text(theme.fg("toolOutput", first) + suffix, 0, 0);
 	}
-	
-	const [, leadingSpace, varName, quotedValue, restOfCommand] = match;
-	
-	// Clean the value - remove outer quotes if present
-	let cleanValue = quotedValue;
-	if (quotedValue.startsWith("'") && quotedValue.endsWith("'")) {
-		cleanValue = quotedValue.slice(1, -1);
-	} else if (quotedValue.startsWith('"') && quotedValue.endsWith('"')) {
-		cleanValue = quotedValue.slice(1, -1);
-	}
-	
-	// Escape single quotes for PowerShell
-	const escapedValue = cleanValue.replace(/'/g, "''");
-	
-	// Build the PowerShell equivalent
-	const remainder = restOfCommand || '';
-	return `${leadingSpace}$env:${varName} = '${escapedValue}';${remainder}`;
+	return new Text(theme.fg("toolOutput", text), 0, 0);
 }
 
 /**
- * Escape PowerShell special characters in the remaining command parts
+ * Convert bash-style `VAR=value command` to PowerShell `$env:VAR = 'value'; command`.
+ * Handles: VAR=value, VAR='value', VAR="value", VAR=''
  */
-function escapePowerShellSpecialChars(str: string): string {
-	// Only escape backticks in the command parts (not in env var assignments we just created)
-	return str.replace(/`/g, "``");
+function bashEnvToPS(command: string): string {
+	const match = command.match(/^(\s*)([A-Z_][A-Z0-9_]*)\s*=\s*('[^']*'|"[^"]*"|\S*)(\s+.+)$/);
+	if (!match) return command;
+	const [, space, name, rawVal, rest] = match;
+	const val = rawVal.replace(/^['"]|['"]$/g, '').replace(/'/g, "''");
+	return `${space}$env:${name} = '${val}';${rest}`;
 }
 
-/**
- * Escape PowerShell string for safe execution within script blocks
- */
-function escapeForPowerShell(str: string): string {
-	// First convert bash-style env vars to PowerShell syntax (this handles quote escaping internally)
-	let processed = convertEnvVarsToPS(str);
-	
-	// Then escape remaining PowerShell special characters
-	processed = escapePowerShellSpecialChars(processed);
-	
-	return processed;
+/** Run a PowerShell command and return formatted result */
+async function run(command: string, cwd: string, timeout = 5000): Promise<{ stdout: string; stderr: string; success: boolean }> {
+	return await executePowerShell({ command, workingDirectory: cwd, timeout });
 }
 
-/**
- * Properly quote a command for PowerShell script block execution
- */
-function quoteForPowerShellScriptBlock(command: string): string {
-	// Convert env vars and escape the command properly
-	const processedCommand = escapeForPowerShell(command);
-	
-	// For script blocks, the command goes directly in the script block
-	return processedCommand;
-}
-
-/**
- * Parse job output into structured data
- */
-function parseJobInfo(output: string): JobInfo[] {
-	try {
-		// Clean up the output - remove any error messages before JSON
-		const lines = output.split('\n');
-		let jsonLine = '';
-		
-		for (const line of lines) {
-			const trimmed = line.trim();
-			if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-				jsonLine = trimmed;
-				break;
-			}
-		}
-		
-		if (!jsonLine) {
-			// No JSON found, return empty array
-			return [];
-		}
-		
-		const jobs = JSON.parse(jsonLine);
-		return Array.isArray(jobs) ? jobs : [jobs].filter(Boolean);
-	} catch (error) {
-		// Fallback parsing if JSON fails
-		console.warn('Failed to parse job info JSON:', error);
-		return [];
-	}
-}
-
-/**
- * Register PowerShell job management helper tools
- */
 export function registerJobHelpers(pi: ExtensionAPI): void {
-	
-	// pwsh-start-job - Start a background PowerShell job
+
 	pi.registerTool({
 		name: "pwsh-start-job",
-		label: "PowerShell Start Job", 
+		label: "PowerShell Start Job",
 		description: "Start a PowerShell background job. Use this instead of & operator which hangs Git Bash. Jobs run in separate PowerShell processes and can be monitored/controlled.",
 		parameters: Type.Object({
 			name: Type.String({ description: "Unique name for the job (for later reference)" }),
 			command: Type.String({ description: "Command to run in the background job" }),
 			workingDirectory: Type.Optional(Type.String({ description: "Working directory for the job (default: current directory)" })),
 		}),
-		
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
-			const { name, command, workingDirectory } = params;
-			const escapedName = escapeForPowerShell(name);
-			const processedCommand = quoteForPowerShellScriptBlock(command);
-			const workDir = workingDirectory || ctx.cwd;
-			const escapedWorkDir = escapeForPowerShell(workDir);
-
-			const powerShellScript = `
-				# Start the job with error trapping for batch files and env vars
-				try {
-					$job = Start-Job -Name '${escapedName}' -ScriptBlock {
-						Set-Location '${escapedWorkDir}'
-						
-						# Execute the processed command
-						try {
-							# Use Invoke-Expression for complex commands with env vars
-							Invoke-Expression "${processedCommand}"
-						} catch {
-							# If Win32 error (batch file issue), try with cmd /c
-							if ($_.Exception.Message -like '*Win32*' -or $_.Exception.Message -like '*no es una aplicación*' -or $_.Exception.Message -like '*cannot run*') {
-								Write-Host "Retrying with cmd /c wrapper due to: $($_.Exception.Message)"
-								cmd /c "${command.replace(/"/g, '\\"')}"
-							} else {
-								throw
-							}
-						}
-					}
-				} catch {
-					# If job creation fails, it might be a batch file command or syntax issue
-					Write-Host "Job creation failed: $($_.Exception.Message). Trying cmd /c approach..."
-					$job = Start-Job -Name '${escapedName}' -ScriptBlock {
-						Set-Location '${escapedWorkDir}'
-						cmd /c "${command.replace(/"/g, '\\"')}"
-					}
-				}
-				
-				# Wait a moment for job to register properly
-				Start-Sleep -Milliseconds 200
-				
-				# Get job info with retry logic
-				$retryCount = 0
-				do {
-					$jobInfo = Get-Job -Name '${escapedName}' -ErrorAction SilentlyContinue
-					if ($jobInfo) { break }
-					Start-Sleep -Milliseconds 100
-					$retryCount++
-				} while ($retryCount -lt 10)
-				
-				if ($jobInfo) {
-					$jobInfo | Select-Object Id, Name, State, HasMoreData, Location, Command | ConvertTo-Json
-				} else {
-					Write-Error "Job created but not found after retries"
-				}
-			`;
-
-			const result = await executePowerShell({
-				command: powerShellScript.trim(),
-				workingDirectory: ctx.cwd,
-				timeout: 10000, // Longer timeout for job startup
-			});
-
-			if (!result.success) {
-				return createJobResult(
-					`Failed to start job '${name}': ${result.stderr || result.stdout}`,
-					{ name, command, error: result.stderr },
-					true
-				);
-			}
-
-			const jobs = parseJobInfo(result.stdout);
-			const job = jobs[0];
-
-			if (!job) {
-				return createJobResult(
-					`Job '${name}' started but could not retrieve job info`,
-					{ name, command, workingDirectory: workDir, warning: "Job info unavailable" }
-				);
-			}
-
-			return createJobResult(
-				`Started job '${name}' (ID: ${job.id}) - Status: ${job.state}`,
-				{ 
-					name, 
-					command, 
-					workingDirectory: workDir,
-					job
-				}
+		renderCall: (args, theme) => {
+			return new Text(
+				theme.fg("toolTitle", theme.bold("pwsh-start-job ")) +
+				theme.fg("accent", args.name) + " " +
+				theme.fg("muted", args.command.length > 80 ? args.command.slice(0, 77) + "..." : args.command),
+				0, 0
 			);
+		},
+		renderResult: jobRenderResult,
+
+		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
+			const { name, command, workingDirectory } = params;
+			const workDir = workingDirectory || ctx.cwd;
+			const psCommand = bashEnvToPS(command);
+			const r = await run(
+				`Start-Job -Name '${name}' -ScriptBlock { Set-Location '${workDir}'; ${psCommand} }; Get-Job -Name '${name}' | Select-Object Id, Name, State | ConvertTo-Json`,
+				ctx.cwd
+			);
+			if (!r.success) return result(`Failed to start job '${name}': ${r.stderr}`, { name, command, error: r.stderr, success: false });
+			return result(r.stdout || `Job '${name}' started`, { name, command, success: true });
 		}
 	});
 
-	// pwsh-get-job - Get job status and information
 	pi.registerTool({
 		name: "pwsh-get-job",
 		label: "PowerShell Get Job",
@@ -233,64 +97,29 @@ export function registerJobHelpers(pi: ExtensionAPI): void {
 			name: Type.Optional(Type.String({ description: "Job name to get info for (omit to list all jobs)" })),
 			includeOutput: Type.Optional(Type.Boolean({ description: "Include job output in response (default: false)" })),
 		}),
-		
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+		renderCall: jobRenderCall,
+		renderResult: jobRenderResult,
+
+		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
 			const { name, includeOutput = false } = params;
-			
-			let command = "Get-Job";
-			if (name) {
-				const escapedName = escapeForPowerShell(name);
-				command = `Get-Job -Name '${escapedName}' -ErrorAction SilentlyContinue`;
-			}
-			
-			command += " | Select-Object Id, Name, State, HasMoreData, Location, Command | ConvertTo-Json";
+			const cmd = name
+				? `Get-Job -Name '${name}' -ErrorAction SilentlyContinue | Select-Object Id, Name, State, HasMoreData | ConvertTo-Json`
+				: `Get-Job | Select-Object Id, Name, State, HasMoreData | ConvertTo-Json`;
 
-			const result = await executePowerShell({
-				command,
-				workingDirectory: ctx.cwd,
-			});
+			const r = await run(cmd, ctx.cwd);
+			if (!r.success) return result(name ? `Job '${name}' not found` : `No jobs: ${r.stderr}`, { name, error: r.stderr, success: false });
 
-			if (!result.success) {
-				return createJobResult(
-					name ? `Job '${name}' not found or error: ${result.stderr}` : `Failed to list jobs: ${result.stderr}`,
-					{ name, error: result.stderr },
-					true
-				);
+			let output = r.stdout || "No jobs found";
+
+			if (includeOutput && name) {
+				const out = await run(`Receive-Job -Name '${name}' -Keep -ErrorAction SilentlyContinue`, ctx.cwd);
+				if (out.stdout) output += `\n\nOutput:\n${out.stdout}`;
 			}
 
-			const jobs = parseJobInfo(result.stdout);
-			
-			if (jobs.length === 0) {
-				return createJobResult(
-					name ? `Job '${name}' not found` : "No jobs found",
-					{ name, jobs: [] }
-				);
-			}
-
-			let output = "";
-			if (name && jobs.length === 1) {
-				const job = jobs[0];
-				output = `Job '${job.name}' (ID: ${job.id})\nState: ${job.state}\nLocation: ${job.location}\nCommand: ${job.command}`;
-				
-				if (includeOutput && job.hasMoreData) {
-					const outputResult = await executePowerShell({
-						command: `Receive-Job -Name '${escapeForPowerShell(name)}' -Keep`,
-						workingDirectory: ctx.cwd,
-					});
-					if (outputResult.success && outputResult.stdout.trim()) {
-						output += `\n\nOutput:\n${outputResult.stdout}`;
-					}
-				}
-			} else {
-				output = `Found ${jobs.length} job(s):\n` + 
-					jobs.map(job => `• ${job.name} (ID: ${job.id}) - ${job.state}`).join('\n');
-			}
-
-			return createJobResult(output, { name, jobs });
+			return result(output, { name, output, success: true });
 		}
 	});
 
-	// pwsh-stop-job - Stop a running PowerShell job
 	pi.registerTool({
 		name: "pwsh-stop-job",
 		label: "PowerShell Stop Job",
@@ -298,81 +127,37 @@ export function registerJobHelpers(pi: ExtensionAPI): void {
 		parameters: Type.Object({
 			name: Type.String({ description: "Name of the job to stop" }),
 		}),
-		
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+		renderCall: jobRenderCall,
+		renderResult: jobRenderResult,
+
+		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
 			const { name } = params;
-			const escapedName = escapeForPowerShell(name);
-
-			const result = await executePowerShell({
-				command: `Stop-Job -Name '${escapedName}' -ErrorAction SilentlyContinue; Get-Job -Name '${escapedName}' -ErrorAction SilentlyContinue | Select-Object Name, State | ConvertTo-Json`,
-				workingDirectory: ctx.cwd,
-			});
-
-			if (!result.success || !result.stdout.trim()) {
-				return createJobResult(
-					`Job '${name}' not found or already stopped`,
-					{ name, error: result.stderr }
-				);
-			}
-
-			const jobs = parseJobInfo(result.stdout);
-			const job = jobs[0];
-
-			return createJobResult(
-				`Stopped job '${name}' - Status: ${job?.state || 'Unknown'}`,
-				{ name, job }
-			);
+			const r = await run(`Stop-Job -Name '${name}' -ErrorAction SilentlyContinue; Get-Job -Name '${name}' -ErrorAction SilentlyContinue | Select-Object Name, State | ConvertTo-Json`, ctx.cwd);
+			return result(r.stdout || `Stopped job '${name}'`, { name, success: r.success });
 		}
 	});
 
-	// pwsh-remove-job - Remove a PowerShell job (cleanup)
 	pi.registerTool({
-		name: "pwsh-remove-job", 
+		name: "pwsh-remove-job",
 		label: "PowerShell Remove Job",
 		description: "Remove a PowerShell background job. This cleans up the job from the job list. Stop the job first if it's still running.",
 		parameters: Type.Object({
 			name: Type.String({ description: "Name of the job to remove" }),
 			force: Type.Optional(Type.Boolean({ description: "Force removal even if job is running (default: false)" })),
 		}),
-		
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+		renderCall: jobRenderCall,
+		renderResult: jobRenderResult,
+
+		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
 			const { name, force = false } = params;
-			const escapedName = escapeForPowerShell(name);
-			
-			let command = `Remove-Job -Name '${escapedName}' -ErrorAction SilentlyContinue`;
-			if (force) {
-				command = `Stop-Job -Name '${escapedName}' -ErrorAction SilentlyContinue; ${command} -Force`;
-			}
-
-			const result = await executePowerShell({
-				command,
-				workingDirectory: ctx.cwd,
-			});
-
-			// Remove-Job doesn't return output on success, so check if it succeeded
-			const checkResult = await executePowerShell({
-				command: `Get-Job -Name '${escapedName}' -ErrorAction SilentlyContinue`,
-				workingDirectory: ctx.cwd,
-			});
-
-			const stillExists = checkResult.success && checkResult.stdout.trim();
-			
-			if (stillExists) {
-				return createJobResult(
-					`Failed to remove job '${name}' - may still be running (use force: true to stop and remove)`,
-					{ name, error: "Job still exists" },
-					true
-				);
-			}
-
-			return createJobResult(
-				`Removed job '${name}'`,
-				{ name, removed: true }
-			);
+			const cmd = force
+				? `Stop-Job -Name '${name}' -ErrorAction SilentlyContinue; Remove-Job -Name '${name}' -Force -ErrorAction SilentlyContinue`
+				: `Remove-Job -Name '${name}' -ErrorAction SilentlyContinue`;
+			const r = await run(cmd, ctx.cwd);
+			return result(r.stderr ? `Failed to remove '${name}': ${r.stderr}` : `Removed job '${name}'`, { name, success: !r.stderr });
 		}
 	});
 
-	// pwsh-get-job-output - Get output from a PowerShell job
 	pi.registerTool({
 		name: "pwsh-get-job-output",
 		label: "PowerShell Get Job Output",
@@ -381,35 +166,17 @@ export function registerJobHelpers(pi: ExtensionAPI): void {
 			name: Type.String({ description: "Name of the job to get output from" }),
 			keep: Type.Optional(Type.Boolean({ description: "Keep output for future calls (default: true)" })),
 		}),
-		
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+		renderCall: jobRenderCall,
+		renderResult: jobRenderResult,
+
+		async execute(_id, params, _signal, _onUpdate, ctx: ExtensionContext) {
 			const { name, keep = true } = params;
-			const escapedName = escapeForPowerShell(name);
-			
-			const command = keep 
-				? `Receive-Job -Name '${escapedName}' -Keep -ErrorAction SilentlyContinue`
-				: `Receive-Job -Name '${escapedName}' -ErrorAction SilentlyContinue`;
-
-			const result = await executePowerShell({
-				command,
-				workingDirectory: ctx.cwd,
-			});
-
-			if (!result.success) {
-				return createJobResult(
-					`Failed to get output from job '${name}': ${result.stderr}`,
-					{ name, error: result.stderr },
-					true
-				);
-			}
-
-			const output = result.stdout || "(no output)";
-			const hasOutput = result.stdout.trim().length > 0;
-
-			return createJobResult(
-				hasOutput ? output : `Job '${name}' has no output yet`,
-				{ name, hasOutput, output: result.stdout, kept: keep }
-			);
+			const cmd = keep
+				? `Receive-Job -Name '${name}' -Keep -ErrorAction SilentlyContinue`
+				: `Receive-Job -Name '${name}' -ErrorAction SilentlyContinue`;
+			const r = await run(cmd, ctx.cwd);
+			if (!r.success) return result(`Failed to get output from '${name}': ${r.stderr}`, { name, error: r.stderr, success: false });
+			return result(r.stdout || `No output from '${name}'`, { name, output: r.stdout, success: true });
 		}
 	});
 }

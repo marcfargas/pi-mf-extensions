@@ -2,7 +2,9 @@
  * PowerShell tool for Windows system integration and background processes.
  */
 
-import type { ExtensionAPI, ExtensionContext, AgentToolResult } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, AgentToolResult, AgentToolUpdateCallback, ToolRenderResultOptions } from "@mariozechner/pi-coding-agent";
+import { Theme } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { spawn } from "child_process";
 import { sessionManager } from "../session/session-manager.js";
@@ -29,21 +31,19 @@ export interface PowerShellToolResult {
 	sessionInfo?: any;
 }
 
+/** Callback for streaming partial output */
+type OnData = (text: string) => void;
+
 /**
- * Direct PowerShell execution without any wrapping or error recovery.
+ * Direct PowerShell execution. Optionally streams output via onData callback.
  */
-async function executePowerShellDirect(options: PowerShellOptions): Promise<PowerShellResult> {
+async function executePowerShellDirect(options: PowerShellOptions, onData?: OnData): Promise<PowerShellResult> {
 	const { command, timeout = 30000, workingDirectory } = options;
 
 	return new Promise((resolve) => {
-		const args = [
-			'-NoProfile',
-			'-NonInteractive', 
-			'-ExecutionPolicy', 'Bypass',
-			'-Command', command
-		];
-
-		const child = spawn('pwsh', args, {
+		const child = spawn('pwsh', [
+			'-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command
+		], {
 			cwd: workingDirectory,
 			stdio: 'pipe',
 			shell: false,
@@ -56,17 +56,14 @@ async function executePowerShellDirect(options: PowerShellOptions): Promise<Powe
 		if (timeout > 0) {
 			timeoutId = setTimeout(() => {
 				child.kill('SIGTERM');
-				resolve({
-					stdout: stdout,
-					stderr: stderr + `\nCommand timed out after ${timeout}ms`,
-					exitCode: -1,
-					success: false,
-				});
+				resolve({ stdout, stderr: stderr + `\nCommand timed out after ${timeout}ms`, exitCode: -1, success: false });
 			}, timeout);
 		}
 
 		child.stdout?.on('data', (data) => {
-			stdout += data.toString();
+			const chunk = data.toString();
+			stdout += chunk;
+			onData?.(stdout);
 		});
 
 		child.stderr?.on('data', (data) => {
@@ -75,22 +72,12 @@ async function executePowerShellDirect(options: PowerShellOptions): Promise<Powe
 
 		child.on('close', (code) => {
 			if (timeoutId) clearTimeout(timeoutId);
-			resolve({
-				stdout: stdout.trim(),
-				stderr: stderr.trim(),
-				exitCode: code ?? 0,
-				success: (code ?? 0) === 0,
-			});
+			resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0, success: (code ?? 0) === 0 });
 		});
 
 		child.on('error', (err) => {
 			if (timeoutId) clearTimeout(timeoutId);
-			resolve({
-				stdout: stdout,
-				stderr: `Failed to start PowerShell: ${err.message}`,
-				exitCode: -1,
-				success: false,
-			});
+			resolve({ stdout, stderr: `Failed to start PowerShell: ${err.message}`, exitCode: -1, success: false });
 		});
 	});
 }
@@ -123,336 +110,176 @@ async function needsBatchWrapping(command: string): Promise<boolean> {
 }
 
 /**
- * Execute PowerShell command with smart batch file handling and error recovery.
- * Uses try-first-then-wrap approach for maximum reliability.
+ * Execute PowerShell command with error recovery for batch files.
  */
-export async function executePowerShell(options: PowerShellOptions): Promise<PowerShellResult> {
+export async function executePowerShell(options: PowerShellOptions, onData?: OnData): Promise<PowerShellResult> {
 	const { command, timeout = 30000, workingDirectory } = options;
 	
-	// First try: execute command as-is
-	const firstResult = await executePowerShellDirect({
-		command,
-		timeout,
-		workingDirectory
-	});
+	const firstResult = await executePowerShellDirect({ command, timeout, workingDirectory }, onData);
 	
-	// Check for Win32 batch file error
+	// Retry with cmd /c if batch file error
 	const isWin32Error = firstResult.stderr.includes('no es una aplicación Win32 válida') ||
 						firstResult.stderr.includes('is not a valid Win32 application') ||
 						firstResult.stderr.includes('cannot run due to the error');
 	
 	if (!firstResult.success && isWin32Error) {
-		// Second try: wrap with cmd /c for batch files
-		const wrappedCommand = `cmd /c "${command}"`;
-		return await executePowerShellDirect({
-			command: wrappedCommand,
-			timeout,
-			workingDirectory
-		});
+		return await executePowerShellDirect({ command: `cmd /c "${command}"`, timeout, workingDirectory }, onData);
 	}
 	
 	return firstResult;
 }
 
 /**
- * Execute PowerShell command with pre-emptive batch file detection.
- * Uses Get-Command to detect batch files before execution.
+ * Execute with pre-emptive batch file detection via Get-Command.
  */
-export async function executePowerShellWithBatchDetection(options: PowerShellOptions): Promise<PowerShellResult> {
+export async function executePowerShellWithBatchDetection(options: PowerShellOptions, onData?: OnData): Promise<PowerShellResult> {
 	const { command, timeout = 30000, workingDirectory } = options;
-	
-	// Smart detection: check if command needs batch wrapping
 	const needsWrapping = await needsBatchWrapping(command);
 	const finalCommand = needsWrapping ? `cmd /c "${command}"` : command;
-	
-	return await executePowerShellDirect({
-		command: finalCommand,
-		timeout,
-		workingDirectory
-	});
+	return await executePowerShellDirect({ command: finalCommand, timeout, workingDirectory }, onData);
 }
 
-function createResult(text: string, details: PowerShellToolResult, isError = false): AgentToolResult<PowerShellToolResult> {
+function createResult(text: string, details: PowerShellToolResult): AgentToolResult<PowerShellToolResult> {
 	return {
 		content: [{ type: "text", text }],
 		details,
-		...(isError ? { isError: true } : {}),
 	};
 }
+
+/** Truncate output to reasonable limits */
+function truncateOutput(text: string): string {
+	if (!text) return "(no output)";
+	const maxLines = 2000;
+	const maxBytes = 50 * 1024;
+	let output = text;
+	let truncated = false;
+
+	const lines = output.split('\n');
+	if (lines.length > maxLines) {
+		output = lines.slice(0, maxLines).join('\n');
+		truncated = true;
+	}
+	if (Buffer.byteLength(output, 'utf8') > maxBytes) {
+		output = Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
+		truncated = true;
+	}
+	if (truncated) output += '\n... [Output truncated]';
+	return output;
+}
+
+/** Execute command with streaming support, returning formatted result */
+async function runCommand(
+	command: string,
+	timeoutMs: number,
+	workingDirectory: string,
+	session: string | undefined,
+	executor: (opts: PowerShellOptions, onData?: OnData) => Promise<PowerShellResult>,
+	onUpdate?: AgentToolUpdateCallback<PowerShellToolResult>,
+): Promise<AgentToolResult<PowerShellToolResult>> {
+	try {
+		if (session) {
+			const sessionResult = await sessionManager.executeInSession(session, command, timeoutMs);
+			const output = [sessionResult.stdout, sessionResult.stderr].filter(Boolean).join('\n');
+			return createResult(truncateOutput(output), {
+				exitCode: sessionResult.success ? 0 : 1,
+				success: sessionResult.success,
+				command, session,
+				sessionInfo: sessionResult.sessionInfo
+			});
+		}
+
+		// Stream partial output via onUpdate
+		const onData = onUpdate ? (partialStdout: string) => {
+			onUpdate({
+				content: [{ type: "text", text: truncateOutput(partialStdout) }],
+				details: { exitCode: -1, success: true, command },
+			});
+		} : undefined;
+
+		const result = await executor({ command, timeout: timeoutMs, workingDirectory }, onData);
+		const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
+		return createResult(truncateOutput(output), {
+			exitCode: result.exitCode,
+			success: result.success,
+			command,
+		});
+	} catch (error) {
+		return createResult(
+			`PowerShell execution failed: ${error instanceof Error ? error.message : String(error)}`,
+			{ exitCode: -1, success: false, command, error: String(error) },
+		);
+	}
+}
+
+/** Shared renderCall for PowerShell tools — shows command like bash does */
+function psRenderCall(args: { command: string; session?: string }, theme: Theme) {
+	const cmd = args.command.length > 120 ? args.command.slice(0, 117) + '...' : args.command;
+	let text = theme.fg("toolTitle", theme.bold("PS> ")) + theme.fg("toolOutput", cmd);
+	if (args.session) text += theme.fg("muted", ` [${args.session}]`);
+	return new Text(text, 0, 0);
+}
+
+/** Shared renderResult for PowerShell tools — shows output with expand/collapse */
+function psRenderResult(result: AgentToolResult<PowerShellToolResult>, options: ToolRenderResultOptions, theme: Theme) {
+	const details = result.details;
+	const textContent = result.content[0];
+	const output = textContent?.type === "text" ? textContent.text : "";
+
+	if (!details?.success) {
+		return new Text(theme.fg("error", output || "Command failed"), 0, 0);
+	}
+
+	if (!output || output === "(no output)") {
+		return new Text(theme.fg("muted", "(no output)"), 0, 0);
+	}
+
+	if (!options.expanded) {
+		// Collapsed: show first line + line count
+		const lines = output.split('\n');
+		const firstLine = lines[0].slice(0, 100);
+		const suffix = lines.length > 1 ? theme.fg("muted", ` (${lines.length} lines)`) : "";
+		return new Text(theme.fg("toolOutput", firstLine) + suffix, 0, 0);
+	}
+
+	// Expanded: show full output
+	return new Text(theme.fg("toolOutput", output), 0, 0);
+}
+
+const psParams = Type.Object({
+	command: Type.String({ description: "PowerShell command or script to execute" }),
+	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 30)" })),
+	session: Type.Optional(Type.String({ description: "PowerShell session name to execute in (maintains state across commands). Use pwsh-create-session to create sessions." })),
+});
 
 /**
  * Register PowerShell tools with pi agent.
  */
 export function registerPowerShellTool(pi: ExtensionAPI): void {
-	// Main PowerShell tool with error recovery
 	pi.registerTool({
 		name: "powershell",
 		label: "PowerShell",
 		description: "Execute PowerShell commands on Windows. Use for Windows system operations, background job management, process control, service management, registry operations, and any task where Git Bash limitations cause issues. Supports persistent sessions for state management and remote execution.",
-		parameters: Type.Object({
-			command: Type.String({ description: "PowerShell command or script to execute" }),
-			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 30)" })),
-			session: Type.Optional(Type.String({ description: "PowerShell session name to execute in (maintains state across commands). Use pwsh-create-session to create sessions." })),
-		}),
-		
-		async execute(
-			_toolCallId: string,
-			params: { command: string; timeout?: number; session?: string },
-			_signal: AbortSignal | undefined,
-			_onUpdate: any,
-			ctx: ExtensionContext
-		) {
+		parameters: psParams,
+		renderCall: psRenderCall,
+		renderResult: psRenderResult,
+
+		async execute(_toolCallId, params, _signal, onUpdate, ctx: ExtensionContext) {
 			const { command, timeout = 30, session } = params;
-			const timeoutMs = timeout * 1000;
-			const workingDirectory = ctx.cwd;
-
-			try {
-				// If session is specified, execute in session
-				if (session) {
-					const sessionResult = await sessionManager.executeInSession(session, command, timeoutMs);
-					
-					// Format output similar to regular execution
-					let output = '';
-					
-					if (sessionResult.stdout) {
-						output += sessionResult.stdout;
-					}
-					
-					if (sessionResult.stderr) {
-						if (output) output += '\n';
-						output += sessionResult.stderr;
-					}
-
-					// Truncate large outputs
-					const maxLines = 2000;
-					const maxBytes = 50 * 1024;
-					
-					const lines = output.split('\n');
-					let truncated = false;
-					
-					if (lines.length > maxLines) {
-						output = lines.slice(0, maxLines).join('\n');
-						truncated = true;
-					}
-					
-					if (Buffer.byteLength(output, 'utf8') > maxBytes) {
-						output = Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
-						truncated = true;
-					}
-					
-					if (truncated) {
-						output += '\n... [Output truncated]';
-					}
-
-					return createResult(
-						output || "(no output)",
-						{
-							exitCode: sessionResult.success ? 0 : 1,
-							success: sessionResult.success,
-							command: command,
-							session: session,
-							sessionInfo: sessionResult.sessionInfo
-						}
-					);
-				}
-
-				// Regular execution without session
-				const result = await executePowerShell({
-					command,
-					timeout: timeoutMs,
-					workingDirectory,
-				});
-
-				// Format output similar to bash tool
-				let output = '';
-				
-				if (result.stdout) {
-					output += result.stdout;
-				}
-				
-				if (result.stderr) {
-					if (output) output += '\n';
-					output += result.stderr;
-				}
-
-				// Truncate large outputs (similar to bash tool behavior)
-				const maxLines = 2000;
-				const maxBytes = 50 * 1024; // 50KB
-				
-				const lines = output.split('\n');
-				let truncated = false;
-				
-				if (lines.length > maxLines) {
-					output = lines.slice(0, maxLines).join('\n');
-					truncated = true;
-				}
-				
-				if (Buffer.byteLength(output, 'utf8') > maxBytes) {
-					output = Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
-					truncated = true;
-				}
-				
-				if (truncated) {
-					output += '\n... [Output truncated]';
-				}
-
-				return createResult(
-					output || "(no output)",
-					{
-						exitCode: result.exitCode,
-						success: result.success,
-						command: command,
-					}
-				);
-
-			} catch (error) {
-				return createResult(
-					`PowerShell execution failed: ${error instanceof Error ? error.message : String(error)}`,
-					{
-						exitCode: -1,
-						success: false,
-						command: command,
-						error: String(error),
-					},
-					true
-				);
-			}
+			return runCommand(command, timeout * 1000, ctx.cwd, session, executePowerShell, onUpdate);
 		}
 	});
 
-	// pwsh-run tool with pre-emptive batch detection
 	pi.registerTool({
 		name: "pwsh-run",
 		label: "PowerShell Run",
 		description: "Execute commands with smart batch file detection. Like powershell tool but with pre-emptive Get-Command checking for more reliable batch file handling. Supports persistent sessions for state management and remote execution.",
-		parameters: Type.Object({
-			command: Type.String({ description: "Command to execute with smart batch file wrapping" }),
-			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 30)" })),
-			session: Type.Optional(Type.String({ description: "PowerShell session name to execute in (maintains state across commands). Use pwsh-create-session to create sessions." })),
-		}),
-		
-		async execute(
-			_toolCallId: string,
-			params: { command: string; timeout?: number; session?: string },
-			_signal: AbortSignal | undefined,
-			_onUpdate: any,
-			ctx: ExtensionContext
-		) {
+		parameters: psParams,
+		renderCall: psRenderCall,
+		renderResult: psRenderResult,
+
+		async execute(_toolCallId, params, _signal, onUpdate, ctx: ExtensionContext) {
 			const { command, timeout = 30, session } = params;
-			const timeoutMs = timeout * 1000;
-			const workingDirectory = ctx.cwd;
-
-			try {
-				// If session is specified, execute in session (sessions handle batch detection internally)
-				if (session) {
-					const sessionResult = await sessionManager.executeInSession(session, command, timeoutMs);
-					
-					// Format output similar to regular execution
-					let output = '';
-					
-					if (sessionResult.stdout) {
-						output += sessionResult.stdout;
-					}
-					
-					if (sessionResult.stderr) {
-						if (output) output += '\n';
-						output += sessionResult.stderr;
-					}
-
-					// Truncate large outputs
-					const maxLines = 2000;
-					const maxBytes = 50 * 1024;
-					
-					const lines = output.split('\n');
-					let truncated = false;
-					
-					if (lines.length > maxLines) {
-						output = lines.slice(0, maxLines).join('\n');
-						truncated = true;
-					}
-					
-					if (Buffer.byteLength(output, 'utf8') > maxBytes) {
-						output = Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
-						truncated = true;
-					}
-					
-					if (truncated) {
-						output += '\n... [Output truncated]';
-					}
-
-					return createResult(
-						output || "(no output)",
-						{
-							exitCode: sessionResult.success ? 0 : 1,
-							success: sessionResult.success,
-							command: command,
-							session: session,
-							sessionInfo: sessionResult.sessionInfo
-						}
-					);
-				}
-
-				// Regular execution with pre-emptive batch detection
-				const result = await executePowerShellWithBatchDetection({
-					command,
-					timeout: timeoutMs,
-					workingDirectory,
-				});
-
-				// Format output similar to bash tool
-				let output = '';
-				
-				if (result.stdout) {
-					output += result.stdout;
-				}
-				
-				if (result.stderr) {
-					if (output) output += '\n';
-					output += result.stderr;
-				}
-
-				// Truncate large outputs
-				const maxLines = 2000;
-				const maxBytes = 50 * 1024; // 50KB
-				
-				const lines = output.split('\n');
-				let truncated = false;
-				
-				if (lines.length > maxLines) {
-					output = lines.slice(0, maxLines).join('\n');
-					truncated = true;
-				}
-				
-				if (Buffer.byteLength(output, 'utf8') > maxBytes) {
-					output = Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
-					truncated = true;
-				}
-				
-				if (truncated) {
-					output += '\n... [Output truncated]';
-				}
-
-				return createResult(
-					output || "(no output)",
-					{
-						exitCode: result.exitCode,
-						success: result.success,
-						command: command,
-					}
-				);
-
-			} catch (error) {
-				return createResult(
-					`PowerShell execution failed: ${error instanceof Error ? error.message : String(error)}`,
-					{
-						exitCode: -1,
-						success: false,
-						command: command,
-						error: String(error),
-					},
-					true
-				);
-			}
+			return runCommand(command, timeout * 1000, ctx.cwd, session, executePowerShellWithBatchDetection, onUpdate);
 		}
 	});
 }
