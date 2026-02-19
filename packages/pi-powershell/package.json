@@ -12,6 +12,7 @@
   },
   "keywords": [
     "pi",
+    "pi-package",
     "agent",
     "powershell",
     "windows",
@@ -20,12 +21,16 @@
   ],
   "files": [
     "src/**/*.ts",
+    "skills/**/*.md",
     "README.md",
     "LICENSE"
   ],
   "pi": {
     "extensions": [
       "./src/index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "peerDependencies": {

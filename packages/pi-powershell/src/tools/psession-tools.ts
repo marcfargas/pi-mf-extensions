@@ -34,7 +34,7 @@ export function registerPSessionTools(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "pwsh-create-session",
 		label: "Create PSSession",
-		description: "Create a persistent PowerShell session for remote execution. Local sessions are auto-created when you pass session='name' to the powershell tool. Use this tool when you need remote connections (computerName, credentials, authentication).",
+		description: "Create a persistent PSSession for remote PowerShell execution. The session maintains state (variables, modules) across commands on the remote machine. Use session='name' on the powershell tool to run commands in it.",
 		parameters: Type.Object({
 			name: Type.String({ description: "Unique name for the session" }),
 			computerName: Type.Optional(Type.String({ description: "Remote computer name (omit for local session)" })),

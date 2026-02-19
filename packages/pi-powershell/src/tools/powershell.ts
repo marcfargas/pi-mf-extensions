@@ -144,10 +144,6 @@ async function runCommand(
 ): Promise<AgentToolResult<PowerShellToolResult>> {
 	try {
 		if (session) {
-			// Auto-create local session on first use
-			if (!sessionManager.getSession(session)) {
-				await sessionManager.createSession(session, {});
-			}
 			const sessionResult = await sessionManager.executeInSession(session, command, timeoutMs);
 			const output = [sessionResult.stdout, sessionResult.stderr].filter(Boolean).join('\n');
 			return createResult(truncateOutput(output), {
@@ -218,7 +214,7 @@ function psRenderResult(result: AgentToolResult<PowerShellToolResult>, options: 
 const psParams = Type.Object({
 	command: Type.String({ description: "PowerShell command or script to execute" }),
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 30)" })),
-	session: Type.Optional(Type.String({ description: "PowerShell session name to execute in (maintains state across commands). Local sessions are auto-created on first use. Use pwsh-create-session for remote sessions." })),
+	session: Type.Optional(Type.String({ description: "PSSession name for remote execution. Create with pwsh-create-session first." })),
 });
 
 /**
@@ -228,7 +224,7 @@ export function registerPowerShellTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "powershell",
 		label: "PowerShell",
-		description: `Execute PowerShell commands on Windows. Use for Windows system operations, background job management, process control, service management, registry operations, and any task where Git Bash limitations cause issues. Supports persistent sessions for state management and remote execution.
+		description: `Execute PowerShell commands on Windows. Use for Windows system operations, background job management, process control, service management, registry operations, and any task where Git Bash limitations cause issues.
 
 QUOTING: PowerShell uses different quoting than bash. Single quotes are literal strings (escape with ''). Double quotes allow variable expansion. Backtick (\`) is the escape character, not backslash.
 
