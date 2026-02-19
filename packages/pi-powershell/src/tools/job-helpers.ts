@@ -24,10 +24,66 @@ function createJobResult<T = unknown>(text: string, details: T, isError = false)
 }
 
 /**
- * Escape PowerShell string for safe execution
+ * Convert bash-style environment variable assignments to PowerShell syntax
+ */
+function convertEnvVarsToPS(command: string): string {
+	// Simple regex to match: VARNAME=value (at start of line, with optional leading spaces)
+	// This handles the most common cases: VAR=value, VAR='value', VAR="value", VAR=''
+	const regex = /^(\s*)([A-Z_][A-Z0-9_]*)\s*=\s*('[^']*'|"[^"]*"|\S+)(\s+.*)?$/;
+	const match = command.match(regex);
+	
+	if (!match) {
+		return command; // No env var pattern found
+	}
+	
+	const [, leadingSpace, varName, quotedValue, restOfCommand] = match;
+	
+	// Clean the value - remove outer quotes if present
+	let cleanValue = quotedValue;
+	if (quotedValue.startsWith("'") && quotedValue.endsWith("'")) {
+		cleanValue = quotedValue.slice(1, -1);
+	} else if (quotedValue.startsWith('"') && quotedValue.endsWith('"')) {
+		cleanValue = quotedValue.slice(1, -1);
+	}
+	
+	// Escape single quotes for PowerShell
+	const escapedValue = cleanValue.replace(/'/g, "''");
+	
+	// Build the PowerShell equivalent
+	const remainder = restOfCommand || '';
+	return `${leadingSpace}$env:${varName} = '${escapedValue}';${remainder}`;
+}
+
+/**
+ * Escape PowerShell special characters in the remaining command parts
+ */
+function escapePowerShellSpecialChars(str: string): string {
+	// Only escape backticks in the command parts (not in env var assignments we just created)
+	return str.replace(/`/g, "``");
+}
+
+/**
+ * Escape PowerShell string for safe execution within script blocks
  */
 function escapeForPowerShell(str: string): string {
-	return str.replace(/'/g, "''").replace(/`/g, "``");
+	// First convert bash-style env vars to PowerShell syntax (this handles quote escaping internally)
+	let processed = convertEnvVarsToPS(str);
+	
+	// Then escape remaining PowerShell special characters
+	processed = escapePowerShellSpecialChars(processed);
+	
+	return processed;
+}
+
+/**
+ * Properly quote a command for PowerShell script block execution
+ */
+function quoteForPowerShellScriptBlock(command: string): string {
+	// Convert env vars and escape the command properly
+	const processedCommand = escapeForPowerShell(command);
+	
+	// For script blocks, the command goes directly in the script block
+	return processedCommand;
 }
 
 /**
@@ -80,36 +136,36 @@ export function registerJobHelpers(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
 			const { name, command, workingDirectory } = params;
 			const escapedName = escapeForPowerShell(name);
-			const escapedCommand = escapeForPowerShell(command);
+			const processedCommand = quoteForPowerShellScriptBlock(command);
 			const workDir = workingDirectory || ctx.cwd;
 			const escapedWorkDir = escapeForPowerShell(workDir);
 
 			const powerShellScript = `
-				# Start the job with error trapping for batch files
+				# Start the job with error trapping for batch files and env vars
 				try {
 					$job = Start-Job -Name '${escapedName}' -ScriptBlock {
 						Set-Location '${escapedWorkDir}'
+						
+						# Execute the processed command
 						try {
-							${escapedCommand}
+							# Use Invoke-Expression for complex commands with env vars
+							Invoke-Expression "${processedCommand}"
 						} catch {
 							# If Win32 error (batch file issue), try with cmd /c
-							if ($_.Exception.Message -like '*Win32*' -or $_.Exception.Message -like '*no es una aplicación*') {
-								cmd /c "${escapedCommand}"
+							if ($_.Exception.Message -like '*Win32*' -or $_.Exception.Message -like '*no es una aplicación*' -or $_.Exception.Message -like '*cannot run*') {
+								Write-Host "Retrying with cmd /c wrapper due to: $($_.Exception.Message)"
+								cmd /c "${command.replace(/"/g, '\\"')}"
 							} else {
 								throw
 							}
 						}
 					}
 				} catch {
-					# If job creation fails, it might be a batch file command
-					if ($_.Exception.Message -like '*Win32*' -or $_.Exception.Message -like '*no es una aplicación*') {
-						# Retry with cmd /c wrapper
-						$job = Start-Job -Name '${escapedName}' -ScriptBlock {
-							Set-Location '${escapedWorkDir}'
-							cmd /c "${escapedCommand}"
-						}
-					} else {
-						throw
+					# If job creation fails, it might be a batch file command or syntax issue
+					Write-Host "Job creation failed: $($_.Exception.Message). Trying cmd /c approach..."
+					$job = Start-Job -Name '${escapedName}' -ScriptBlock {
+						Set-Location '${escapedWorkDir}'
+						cmd /c "${command.replace(/"/g, '\\"')}"
 					}
 				}
 				
