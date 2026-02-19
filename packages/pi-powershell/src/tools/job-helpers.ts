@@ -15,7 +15,11 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { tmpdir } from "os";
 import { join } from "path";
+import { randomBytes } from "crypto";
 import { executePowerShell } from "./powershell.js";
+
+/** Short unique suffix to avoid temp file collisions across pi instances */
+const instanceId = randomBytes(3).toString('hex');
 
 interface TrackedJob {
 	pid: number;
@@ -98,7 +102,7 @@ Bash-style env vars (NODE_ENV=production npm start) are auto-converted to PowerS
 			const psCommand = bashEnvToPS(command);
 
 			// Resolve stdout/stderr targets
-			const stdoutFile = stdout === 'null' ? null : (stdout || join(tmpdir(), `pi-job-${name}-stdout.log`));
+			const stdoutFile = stdout === 'null' ? null : (stdout || join(tmpdir(), `pi-job-${name}-${instanceId}-stdout.log`));
 			const stderrTarget = stderr || 'stdout';  // default: merge with stdout
 			const stderrFile = stderrTarget === 'null' ? null
 				: stderrTarget === 'stdout' ? null     // null = merged
