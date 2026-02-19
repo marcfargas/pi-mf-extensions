@@ -144,6 +144,10 @@ async function runCommand(
 ): Promise<AgentToolResult<PowerShellToolResult>> {
 	try {
 		if (session) {
+			// Auto-create local session on first use
+			if (!sessionManager.getSession(session)) {
+				await sessionManager.createSession(session, {});
+			}
 			const sessionResult = await sessionManager.executeInSession(session, command, timeoutMs);
 			const output = [sessionResult.stdout, sessionResult.stderr].filter(Boolean).join('\n');
 			return createResult(truncateOutput(output), {
@@ -214,7 +218,7 @@ function psRenderResult(result: AgentToolResult<PowerShellToolResult>, options: 
 const psParams = Type.Object({
 	command: Type.String({ description: "PowerShell command or script to execute" }),
 	timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 30)" })),
-	session: Type.Optional(Type.String({ description: "PowerShell session name to execute in (maintains state across commands). Use pwsh-create-session to create sessions." })),
+	session: Type.Optional(Type.String({ description: "PowerShell session name to execute in (maintains state across commands). Local sessions are auto-created on first use. Use pwsh-create-session for remote sessions." })),
 });
 
 /**

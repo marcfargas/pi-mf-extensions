@@ -123,26 +123,27 @@ PowerShell quoting is different from bash:
 
 ## Persistent Sessions
 
-Sessions keep a PowerShell process alive across tool calls — variables, imported modules, and custom functions persist.
+Sessions keep a PowerShell process alive across tool calls — variables, imported modules, and custom functions persist. Local sessions are **auto-created on first use** — just pass `session`:
 
 ```javascript
-// Create session
-await tools['pwsh-create-session']({ name: 'dev' });
-
-// State persists across calls
+// No setup needed — session 'dev' is created automatically
 await tools.powershell({ command: '$x = 42', session: 'dev' });
 await tools.powershell({ command: 'Write-Output $x', session: 'dev' }); // → 42
 
-// Supports remote connections
+// Clean up when done
+await tools['pwsh-close-session']({ name: 'dev' });
+```
+
+For **remote** sessions, use `pwsh-create-session` to specify connection details:
+
+```javascript
 await tools['pwsh-create-session']({
   name: 'prod',
   computerName: 'server.company.com',
   credential: 'domain\\admin',
   authentication: 'Kerberos'
 });
-
-// Clean up
-await tools['pwsh-close-session']({ name: 'dev' });
+await tools.powershell({ command: 'Get-Service IIS', session: 'prod' });
 ```
 
 ## When to Use What
