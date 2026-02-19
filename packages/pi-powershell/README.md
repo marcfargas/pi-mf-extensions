@@ -4,6 +4,8 @@
 
 PowerShell tool for pi agents — Windows system integration, background processes, and persistent session management.
 
+**Architecture**: Multi-layer fallback strategy (direct → batch detection → cmd /c wrapper) with automatic bash→PowerShell quoting conversion. Persistent sessions maintain state across commands. 50 tests covering all scenarios.
+
 ## Problem Solved
 
 Windows Git Bash has significant limitations when used by AI agents:
