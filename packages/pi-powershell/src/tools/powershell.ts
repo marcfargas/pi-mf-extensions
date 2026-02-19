@@ -5,6 +5,7 @@
 import type { ExtensionAPI, ExtensionContext, AgentToolResult } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { spawn } from "child_process";
+import { sessionManager } from "../session/session-manager.js";
 
 export interface PowerShellOptions {
 	command: string;
@@ -24,6 +25,8 @@ export interface PowerShellToolResult {
 	success: boolean;
 	command: string;
 	error?: string;
+	session?: string;
+	sessionInfo?: any;
 }
 
 /**
@@ -185,24 +188,75 @@ export function registerPowerShellTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "powershell",
 		label: "PowerShell",
-		description: "Execute PowerShell commands on Windows. Use for Windows system operations, background job management, process control, service management, registry operations, and any task where Git Bash limitations cause issues.",
+		description: "Execute PowerShell commands on Windows. Use for Windows system operations, background job management, process control, service management, registry operations, and any task where Git Bash limitations cause issues. Supports persistent sessions for state management and remote execution.",
 		parameters: Type.Object({
 			command: Type.String({ description: "PowerShell command or script to execute" }),
 			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 30)" })),
+			session: Type.Optional(Type.String({ description: "PowerShell session name to execute in (maintains state across commands). Use pwsh-create-session to create sessions." })),
 		}),
 		
 		async execute(
 			_toolCallId: string,
-			params: { command: string; timeout?: number },
+			params: { command: string; timeout?: number; session?: string },
 			_signal: AbortSignal | undefined,
 			_onUpdate: any,
 			ctx: ExtensionContext
 		) {
-			const { command, timeout = 30 } = params;
+			const { command, timeout = 30, session } = params;
 			const timeoutMs = timeout * 1000;
 			const workingDirectory = ctx.cwd;
 
 			try {
+				// If session is specified, execute in session
+				if (session) {
+					const sessionResult = await sessionManager.executeInSession(session, command, timeoutMs);
+					
+					// Format output similar to regular execution
+					let output = '';
+					
+					if (sessionResult.stdout) {
+						output += sessionResult.stdout;
+					}
+					
+					if (sessionResult.stderr) {
+						if (output) output += '\n';
+						output += sessionResult.stderr;
+					}
+
+					// Truncate large outputs
+					const maxLines = 2000;
+					const maxBytes = 50 * 1024;
+					
+					const lines = output.split('\n');
+					let truncated = false;
+					
+					if (lines.length > maxLines) {
+						output = lines.slice(0, maxLines).join('\n');
+						truncated = true;
+					}
+					
+					if (Buffer.byteLength(output, 'utf8') > maxBytes) {
+						output = Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
+						truncated = true;
+					}
+					
+					if (truncated) {
+						output += '\n... [Output truncated]';
+					}
+
+					return createResult(
+						output || "(no output)",
+						{
+							exitCode: sessionResult.success ? 0 : 1,
+							success: sessionResult.success,
+							command: command,
+							session: session,
+							sessionInfo: sessionResult.sessionInfo
+						}
+					);
+				}
+
+				// Regular execution without session
 				const result = await executePowerShell({
 					command,
 					timeout: timeoutMs,
@@ -270,24 +324,75 @@ export function registerPowerShellTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "pwsh-run",
 		label: "PowerShell Run",
-		description: "Execute commands with smart batch file detection. Like powershell tool but with pre-emptive Get-Command checking for more reliable batch file handling.",
+		description: "Execute commands with smart batch file detection. Like powershell tool but with pre-emptive Get-Command checking for more reliable batch file handling. Supports persistent sessions for state management and remote execution.",
 		parameters: Type.Object({
 			command: Type.String({ description: "Command to execute with smart batch file wrapping" }),
 			timeout: Type.Optional(Type.Number({ description: "Timeout in seconds (default: 30)" })),
+			session: Type.Optional(Type.String({ description: "PowerShell session name to execute in (maintains state across commands). Use pwsh-create-session to create sessions." })),
 		}),
 		
 		async execute(
 			_toolCallId: string,
-			params: { command: string; timeout?: number },
+			params: { command: string; timeout?: number; session?: string },
 			_signal: AbortSignal | undefined,
 			_onUpdate: any,
 			ctx: ExtensionContext
 		) {
-			const { command, timeout = 30 } = params;
+			const { command, timeout = 30, session } = params;
 			const timeoutMs = timeout * 1000;
 			const workingDirectory = ctx.cwd;
 
 			try {
+				// If session is specified, execute in session (sessions handle batch detection internally)
+				if (session) {
+					const sessionResult = await sessionManager.executeInSession(session, command, timeoutMs);
+					
+					// Format output similar to regular execution
+					let output = '';
+					
+					if (sessionResult.stdout) {
+						output += sessionResult.stdout;
+					}
+					
+					if (sessionResult.stderr) {
+						if (output) output += '\n';
+						output += sessionResult.stderr;
+					}
+
+					// Truncate large outputs
+					const maxLines = 2000;
+					const maxBytes = 50 * 1024;
+					
+					const lines = output.split('\n');
+					let truncated = false;
+					
+					if (lines.length > maxLines) {
+						output = lines.slice(0, maxLines).join('\n');
+						truncated = true;
+					}
+					
+					if (Buffer.byteLength(output, 'utf8') > maxBytes) {
+						output = Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
+						truncated = true;
+					}
+					
+					if (truncated) {
+						output += '\n... [Output truncated]';
+					}
+
+					return createResult(
+						output || "(no output)",
+						{
+							exitCode: sessionResult.success ? 0 : 1,
+							success: sessionResult.success,
+							command: command,
+							session: session,
+							sessionInfo: sessionResult.sessionInfo
+						}
+					);
+				}
+
+				// Regular execution with pre-emptive batch detection
 				const result = await executePowerShellWithBatchDetection({
 					command,
 					timeout: timeoutMs,
