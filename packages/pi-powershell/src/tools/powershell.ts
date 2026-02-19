@@ -83,33 +83,6 @@ async function executePowerShellDirect(options: PowerShellOptions, onData?: OnDa
 }
 
 /**
- * Check if a command needs batch file wrapping using Get-Command.
- */
-async function needsBatchWrapping(command: string): Promise<boolean> {
-	const trimmed = command.trim();
-	const firstWord = trimmed.split(/\s+/)[0];
-	
-	if (!firstWord) return false;
-	
-	try {
-		const result = await executePowerShellDirect({
-			command: `Get-Command '${firstWord}' -ErrorAction SilentlyContinue | Select-Object CommandType | ConvertTo-Json`,
-			timeout: 3000
-		});
-		
-		if (result.success && result.stdout) {
-			const cmdInfo = JSON.parse(result.stdout);
-			// ExternalScript typically means .cmd, .bat files
-			return cmdInfo.CommandType === 'ExternalScript';
-		}
-	} catch {
-		// If we can't determine, err on the side of caution
-	}
-	
-	return false;
-}
-
-/**
  * Execute PowerShell command with error recovery for batch files.
  */
 export async function executePowerShell(options: PowerShellOptions, onData?: OnData): Promise<PowerShellResult> {
@@ -127,16 +100,6 @@ export async function executePowerShell(options: PowerShellOptions, onData?: OnD
 	}
 	
 	return firstResult;
-}
-
-/**
- * Execute with pre-emptive batch file detection via Get-Command.
- */
-export async function executePowerShellWithBatchDetection(options: PowerShellOptions, onData?: OnData): Promise<PowerShellResult> {
-	const { command, timeout = 30000, workingDirectory } = options;
-	const needsWrapping = await needsBatchWrapping(command);
-	const finalCommand = needsWrapping ? `cmd /c "${command}"` : command;
-	return await executePowerShellDirect({ command: finalCommand, timeout, workingDirectory }, onData);
 }
 
 function createResult(text: string, details: PowerShellToolResult): AgentToolResult<PowerShellToolResult> {
@@ -258,7 +221,13 @@ export function registerPowerShellTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "powershell",
 		label: "PowerShell",
-		description: "Execute PowerShell commands on Windows. Use for Windows system operations, background job management, process control, service management, registry operations, and any task where Git Bash limitations cause issues. Supports persistent sessions for state management and remote execution.",
+		description: `Execute PowerShell commands on Windows. Use for Windows system operations, background job management, process control, service management, registry operations, and any task where Git Bash limitations cause issues. Supports persistent sessions for state management and remote execution.
+
+QUOTING: PowerShell uses different quoting than bash. Single quotes are literal strings (escape with ''). Double quotes allow variable expansion. Backtick (\`) is the escape character, not backslash.
+
+BATCH FILES: npm, yarn, pnpm are .cmd batch files on Windows. If a command fails with "not a valid Win32 application", the tool automatically retries with cmd /c. You can also wrap explicitly: cmd /c "npm run dev"
+
+ENVIRONMENT VARIABLES: Use PowerShell syntax: $env:NODE_ENV = 'production'; npm start (NOT bash-style NODE_ENV=production).`,
 		parameters: psParams,
 		renderCall: psRenderCall,
 		renderResult: psRenderResult,
@@ -269,17 +238,4 @@ export function registerPowerShellTool(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.registerTool({
-		name: "pwsh-run",
-		label: "PowerShell Run",
-		description: "Execute commands with smart batch file detection. Like powershell tool but with pre-emptive Get-Command checking for more reliable batch file handling. Supports persistent sessions for state management and remote execution.",
-		parameters: psParams,
-		renderCall: psRenderCall,
-		renderResult: psRenderResult,
-
-		async execute(_toolCallId, params, _signal, onUpdate, ctx: ExtensionContext) {
-			const { command, timeout = 30, session } = params;
-			return runCommand(command, timeout * 1000, ctx.cwd, session, executePowerShellWithBatchDetection, onUpdate);
-		}
-	});
 }

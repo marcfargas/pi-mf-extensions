@@ -60,7 +60,9 @@ export function registerJobHelpers(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "pwsh-start-job",
 		label: "PowerShell Start Job",
-		description: "Start a PowerShell background job. Use this instead of & operator which hangs Git Bash. Jobs run in separate PowerShell processes and can be monitored/controlled.",
+		description: `Start a PowerShell background job. Use this instead of & operator which hangs Git Bash. Jobs run in separate PowerShell processes and can be monitored/controlled.
+
+Bash-style env vars (NODE_ENV=production npm start) are auto-converted to PowerShell syntax ($env:NODE_ENV = 'production'; npm start). Batch files (npm, yarn, pnpm) are handled automatically.`,
 		parameters: Type.Object({
 			name: Type.String({ description: "Unique name for the job (for later reference)" }),
 			command: Type.String({ description: "Command to run in the background job" }),

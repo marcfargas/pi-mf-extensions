@@ -7,18 +7,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { registerPowerShellTool } from "./tools/powershell.js";
 import { registerJobHelpers } from "./tools/job-helpers.js";
-import { registerSessionTools } from "./tools/session-tools.js";
+import { registerPSessionTools } from "./tools/psession-tools.js";
 import { sessionManager } from "./session/session-manager.js";
 
 export default function activate(pi: ExtensionAPI): void {
-	// Register the general PowerShell tools
 	registerPowerShellTool(pi);
-	
-	// Register job management helpers
 	registerJobHelpers(pi);
-	
-	// Register session management tools
-	registerSessionTools(pi);
+	registerPSessionTools(pi);
 	
 	// Handle extension cleanup
 	process.on('SIGINT', async () => {

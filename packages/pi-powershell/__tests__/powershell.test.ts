@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
-import { executePowerShell, executePowerShellWithBatchDetection } from "../src/tools/powershell.js";
+import { executePowerShell } from "../src/tools/powershell.js";
 
 describe("PowerShell Tool", () => {
 	// Skip tests if PowerShell is not available
@@ -123,15 +123,15 @@ describe("PowerShell Tool", () => {
 		});
 	});
 
-	describe("Batch Command Handling - Pre-emptive Detection", () => {
-		it("should handle npm commands with pre-emptive detection", async () => {
+	describe("Batch File Auto-Recovery", () => {
+		it("should handle npm via cmd /c auto-retry on Win32 error", async () => {
 			if (!isPowerShellAvailable) {
 				console.log("Skipping test: PowerShell not available");
 				return;
 			}
 
-			// Test that npm commands work via Get-Command detection
-			const result = await executePowerShellWithBatchDetection({
+			// npm is a .cmd batch file — executePowerShell retries with cmd /c
+			const result = await executePowerShell({
 				command: "npm --version"
 			});
 
@@ -139,19 +139,19 @@ describe("PowerShell Tool", () => {
 			expect(result.stdout).toMatch(/^\d+\.\d+\.\d+/);
 		});
 
-		it("should detect PowerShell native commands correctly", async () => {
+		it("should handle explicit cmd /c wrapping for batch files", async () => {
 			if (!isPowerShellAvailable) {
 				console.log("Skipping test: PowerShell not available");
 				return;
 			}
 
-			// Test that native PowerShell commands work without wrapping
-			const result = await executePowerShellWithBatchDetection({
-				command: "Get-Date -Format 'yyyy-MM-dd'"
+			// Explicit cmd /c wrapping (what the tool description tells agents to do)
+			const result = await executePowerShell({
+				command: 'cmd /c "npm --version"'
 			});
 
 			expect(result.success).toBe(true);
-			expect(result.stdout).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+			expect(result.stdout).toMatch(/^\d+\.\d+\.\d+/);
 		});
 	});
 
