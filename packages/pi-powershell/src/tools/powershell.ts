@@ -40,9 +40,12 @@ type OnData = (text: string) => void;
 async function executePowerShellDirect(options: PowerShellOptions, onData?: OnData): Promise<PowerShellResult> {
 	const { command, timeout = 30000, workingDirectory } = options;
 
+	// Force UTF-8 output encoding so non-ASCII characters (accents, etc.) aren't mangled
+	const utf8Prefix = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; ';
+
 	return new Promise((resolve) => {
 		const child = spawn('pwsh', [
-			'-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', command
+			'-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', utf8Prefix + command
 		], {
 			cwd: workingDirectory,
 			stdio: 'pipe',
