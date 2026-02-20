@@ -122,6 +122,40 @@ export interface TestSession {
 	dispose(): void;
 }
 
+// ── MockPi types ────────────────────────────────────────────
+
+/** Configuration for a single mock pi invocation response. */
+export interface MockPiCall {
+	/** Text output from the mock agent */
+	output?: string;
+	/** Exit code (default: 0) */
+	exitCode?: number;
+	/** Stderr output */
+	stderr?: string;
+	/** Delay in ms before responding */
+	delay?: number;
+	/** Raw JSONL events to emit instead of default message_end */
+	jsonl?: object[];
+	/** Files to write before exiting (path → content) */
+	writeFiles?: Record<string, string>;
+}
+
+/** Mock pi CLI for testing extensions that spawn pi as a subprocess. */
+export interface MockPi {
+	/** Create temp dir with pi shim, prepend to PATH */
+	install(): void;
+	/** Remove from PATH, delete temp dir */
+	uninstall(): void;
+	/** Queue a response for the next pi invocation */
+	onCall(response: MockPiCall): void;
+	/** Clear the response queue and reset the call counter */
+	reset(): void;
+	/** Number of times the mock pi has been invoked */
+	callCount(): number;
+	/** The temporary directory containing the queue and shim */
+	dir: string;
+}
+
 // ── Sandbox types ───────────────────────────────────────────
 
 export interface SandboxOptions {

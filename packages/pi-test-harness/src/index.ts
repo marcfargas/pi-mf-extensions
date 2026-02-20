@@ -17,6 +17,9 @@ export { createTestSession } from "./session.js";
 // Sandbox
 export { verifySandboxInstall } from "./sandbox.js";
 
+// Mock Pi
+export { createMockPi } from "./mock-pi.js";
+
 // Types
 export type {
 	TestSession,
@@ -29,6 +32,8 @@ export type {
 	MockUIConfig,
 	SandboxOptions,
 	SandboxResult,
+	MockPi,
+	MockPiCall,
 	Turn,
 	PlaybookAction,
 } from "./types.js";

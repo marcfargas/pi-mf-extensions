@@ -30,6 +30,7 @@
     "dist/**/*.d.ts.map",
     "dist/**/*.js.map",
     "src/**/*.ts",
+    "src/**/*.mjs",
     "README.md",
     "LICENSE"
   ],
