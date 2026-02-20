@@ -28,6 +28,16 @@ import type { MockPi, MockPiCall } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/** Valid keys for MockPiCall — used for runtime validation. */
+const VALID_MOCK_PI_CALL_KEYS = new Set([
+	"output",
+	"exitCode",
+	"stderr",
+	"delay",
+	"jsonl",
+	"writeFiles",
+]);
+
 /**
  * Resolve the mock-pi-script.mjs path.
  *
@@ -50,6 +60,14 @@ function findMockPiScript(): string {
 	);
 }
 
+/**
+ * Create a mock pi CLI for testing extensions that spawn pi as a subprocess.
+ *
+ * **Concurrency constraint**: Designed for serial subprocess spawns within a single test.
+ * If your test spawns multiple pi processes concurrently, responses may be consumed
+ * out of order. Use separate `createMockPi()` instances for concurrent scenarios,
+ * or ensure your test logic doesn't depend on response ordering.
+ */
 export function createMockPi(): MockPi {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-mock-"));
 	let originalPath: string | undefined;
@@ -64,6 +82,13 @@ export function createMockPi(): MockPi {
 
 	const scriptPath = findMockPiScript();
 	const nodeExe = process.execPath;
+
+	// Safety net: restore PATH if process exits without uninstall()
+	const exitHandler = () => {
+		if (originalPath !== undefined) {
+			process.env.PATH = originalPath;
+		}
+	};
 
 	return {
 		dir,
@@ -92,11 +117,13 @@ export function createMockPi(): MockPi {
 			}
 
 			process.env.PATH = `${dir}${path.delimiter}${originalPath}`;
+			process.on("exit", exitHandler);
 			installed = true;
 		},
 
 		uninstall() {
 			if (!installed) return;
+			process.removeListener("exit", exitHandler);
 			if (originalPath !== undefined) {
 				process.env.PATH = originalPath;
 				originalPath = undefined;
@@ -110,6 +137,17 @@ export function createMockPi(): MockPi {
 		},
 
 		onCall(response: MockPiCall) {
+			// Validate keys to catch typos early
+			const unknown = Object.keys(response).filter(
+				(k) => !VALID_MOCK_PI_CALL_KEYS.has(k),
+			);
+			if (unknown.length > 0) {
+				throw new Error(
+					`Unknown MockPiCall key(s): ${unknown.join(", ")}. ` +
+						`Valid keys: ${[...VALID_MOCK_PI_CALL_KEYS].join(", ")}`,
+				);
+			}
+
 			const queue: MockPiCall[] = JSON.parse(fs.readFileSync(queueFile, "utf-8"));
 			queue.push(response);
 			fs.writeFileSync(queueFile, JSON.stringify(queue));

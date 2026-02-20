@@ -260,6 +260,39 @@ describe("createMockPi", () => {
 		expect(elapsed).toBeGreaterThanOrEqual(40); // allow some timing slack
 	});
 
+	// ── Validation ──────────────────────────────────────────
+
+	it("onCall() rejects unknown keys (catches typos)", () => {
+		expect(() => {
+			mockPi.onCall({ ouptut: "typo" } as any);
+		}).toThrow(/Unknown MockPiCall key.*ouptut/);
+	});
+
+	it("onCall() rejects multiple unknown keys", () => {
+		expect(() => {
+			mockPi.onCall({ ouptut: "a", exitCod: 1 } as any);
+		}).toThrow(/ouptut|exitCod/);
+	});
+
+	it("onCall() accepts all valid keys together", () => {
+		expect(() => {
+			mockPi.onCall({
+				output: "ok",
+				exitCode: 0,
+				stderr: "warn",
+				delay: 10,
+				jsonl: [{ type: "test" }],
+				writeFiles: { "/tmp/test.txt": "content" },
+			});
+		}).not.toThrow();
+	});
+
+	it("onCall() accepts empty object", () => {
+		expect(() => {
+			mockPi.onCall({});
+		}).not.toThrow();
+	});
+
 	// ── Multiple features in one call ───────────────────────
 
 	it("combines output, stderr, writeFiles, and exitCode", () => {

@@ -14,6 +14,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+// Safety timeout — prevent hanging tests if something goes wrong
+const TIMEOUT_MS = 30_000;
+setTimeout(() => {
+	process.stderr.write("mock-pi-script: timeout after 30s\n");
+	process.exit(124);
+}, TIMEOUT_MS).unref();
+
 // ---------------------------------------------------------------------------
 // Queue directory (set by the shim script)
 // ---------------------------------------------------------------------------
