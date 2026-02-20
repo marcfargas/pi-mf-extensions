@@ -342,6 +342,79 @@ const result = await verifySandboxInstall({
 });
 ```
 
+## Mock Pi CLI
+
+For extensions that spawn `pi --mode json -p` as a subprocess (e.g., subagent orchestrators), `createMockPi()` puts a fake `pi` binary in PATH that returns controllable responses.
+
+```typescript
+import { createMockPi } from "@marcfargas/pi-test-harness";
+
+const mockPi = createMockPi();
+mockPi.install();  // creates temp dir with pi shim, prepends PATH
+
+// Queue responses (consumed in order, last one repeats)
+mockPi.onCall({ output: "Hello from agent", exitCode: 0 });
+mockPi.onCall({ stderr: "agent crashed", exitCode: 1 });
+mockPi.onCall({
+  jsonl: [
+    { type: "tool_execution_start", toolName: "bash" },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+  ],
+});
+
+// Write files during execution (e.g., chain_dir output simulation)
+mockPi.onCall({
+  output: "Result written",
+  writeFiles: { "/tmp/output.md": "# Result\nDone." },
+});
+
+// Reset queue between tests
+mockPi.reset();
+
+// Check invocation count
+expect(mockPi.callCount()).toBe(0);
+
+// Cleanup
+mockPi.uninstall();  // restores PATH, deletes temp dir
+```
+
+### How it works
+
+1. `install()` creates a temp directory with a platform-specific shim (`pi.cmd` on Windows, `pi` shell script on Linux)
+2. The shim is prepended to PATH so `child_process.spawn("pi", ...)` resolves to it
+3. Each invocation reads the next response from a file-based queue (`queue.json` + `counter`)
+4. When the queue is exhausted, the last response repeats
+5. If no responses are queued, the mock echoes the task text
+
+### Response options
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `output` | `string` | echo task | Text in the `message_end` event |
+| `exitCode` | `number` | `0` | Process exit code |
+| `stderr` | `string` | — | Written to stderr |
+| `delay` | `number` | `0` | Delay in ms before responding |
+| `jsonl` | `object[]` | — | Raw JSONL events (replaces default `message_end`) |
+| `writeFiles` | `Record<string, string>` | — | Files to create (path → content) |
+
+### Safety features
+
+- **Exit handler**: PATH is restored on process exit even if `uninstall()` isn't called (test crash safety)
+- **Key validation**: Typos like `{ ouptut: "..." }` throw immediately instead of silently passing
+- **Timeout**: Mock script exits after 30s to prevent hanging tests
+
+### Concurrency
+
+Designed for **serial subprocess spawns** within a single test. If your test spawns multiple pi processes concurrently, responses may be consumed out of order.
+
+### Test layer summary
+
+| Layer | What it mocks | Use when |
+|-------|--------------|----------|
+| `createTestSession` | LLM (`streamFn`) | Testing extension logic in-process |
+| `verifySandboxInstall` | Nothing (real install) | Verifying npm package works |
+| `createMockPi` | pi CLI binary | Testing subprocess-spawning extensions |
+
 ## API Reference
 
 ### `createTestSession(options?)`
@@ -381,6 +454,21 @@ Returns `Promise<TestSession>`.
 | `expect.skills` | `number` | Expected skill count |
 | `smoke.mockTools` | `Record<string, MockToolHandler>` | Mock tools for smoke test |
 | `smoke.script` | `Turn[]` | Playbook script for smoke test |
+
+### `createMockPi()`
+
+Creates a mock pi CLI with file-based response queue.
+
+Returns `MockPi`:
+
+| Property / Method | Type | Description |
+|-------------------|------|-------------|
+| `install()` | `void` | Create shim, prepend to PATH |
+| `uninstall()` | `void` | Restore PATH, delete temp dir |
+| `onCall(response)` | `void` | Queue a `MockPiCall` response |
+| `reset()` | `void` | Clear queue and counter |
+| `callCount()` | `number` | Number of times mock pi was invoked |
+| `dir` | `string` | Temp directory path |
 
 ### `MockToolHandler`
 
