@@ -1,6 +1,6 @@
 {
   "name": "@marcfargas/pi-powershell",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "PowerShell tool for pi agents - Windows system integration and background processes",
   "author": "Marc Fargas",
   "license": "MIT",
