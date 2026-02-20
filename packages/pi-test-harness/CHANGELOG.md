@@ -1,5 +1,19 @@
 # @marcfargas/pi-test-harness
 
+## 0.4.0
+
+### Minor Changes
+
+- [`688e5fa`](https://github.com/marcfargas/pi-mf-extensions/commit/688e5faa29a1c2673699d5e120b95b619e451ae6) Thanks [@marcfargas](https://github.com/marcfargas)! - Ship compiled `.js` + `.d.ts` output instead of raw TypeScript sources
+
+  Previously, the package shipped only `.ts` source files and relied on consumers having a TypeScript-aware loader (jiti, vitest). Node 24's `--experimental-strip-types` refuses to process `.ts` files inside `node_modules/`, making the package unusable with `node --test` or any Node-native test runner.
+
+  Now:
+
+  - Package exports point to pre-compiled `dist/index.js` (with `dist/index.d.ts` for types)
+  - Source `.ts` files are still included for debugging/source maps
+  - Build step (`tsc -p tsconfig.build.json`) runs automatically before publish via `prepublishOnly`
+
 ## 0.3.0
 
 ### Minor Changes
