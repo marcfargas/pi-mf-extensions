@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
+    "test:e2e": "vitest run --config vitest.config.e2e.ts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint packages/",
     "changeset": "changeset",

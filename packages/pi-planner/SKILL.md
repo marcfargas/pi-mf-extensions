@@ -1,3 +1,13 @@
+---
+name: pi-planner
+description: >-
+  Plan mode and plan proposal tools for consequential external actions.
+  Use when: planning Odoo writes, email sends, calendar changes, deployments,
+  cross-system workflows, or any irreversible operation that needs user approval.
+  Triggers: plan mode, plan_propose, plan_approve, consequential action, external action,
+  deploy plan, send plan, plan skill safety, safety registry.
+---
+
 # Plan Mode
 
 You have `plan_mode` and `plan_propose` tools for planning consequential actions.
